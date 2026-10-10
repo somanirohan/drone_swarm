@@ -7,7 +7,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from integrations.disruptionops_bridge import DisruptionOpsBridge, BridgeError, geo_position, local_position, observation_event, validate_external_state
+from swarm_ops.integrations.disruptionops_bridge import DisruptionOpsBridge, BridgeError, geo_position, local_position, observation_event, validate_external_state
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -143,7 +143,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await b.poll_once("runA")
 
     async def test_actual_engine_snapshot_is_exported_without_hidden_dispatch_claims(self):
-        from ops_simulation import OperationsSimulation
+        from swarm_ops.engine import OperationsSimulation
         b = self.bridge()
         sim = OperationsSimulation()
         self.assertEqual(b.enqueue_snapshot(sim.snapshot()), 2)

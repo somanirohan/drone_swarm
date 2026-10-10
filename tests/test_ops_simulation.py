@@ -6,7 +6,7 @@ import time
 import unittest
 from pathlib import Path
 
-from ops_simulation import ACTIVITIES, BEHAVIORS, PERSON_STATUSES, OperationsSimulation, _default_world, _inside
+from swarm_ops.engine import ACTIVITIES, BEHAVIORS, PERSON_STATUSES, OperationsSimulation, _default_world, _inside
 
 
 class OperationsTests(unittest.TestCase):
@@ -299,8 +299,8 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(incident["status"],"resolved")
 
 
-PUNE=Path(__file__).resolve().parent/"assets"/"operations"/"pune-world.json"
-CATALOG=Path(__file__).resolve().parent/"assets"/"operations"/"agency-catalog.json"
+PUNE=Path(__file__).resolve().parents[1]/"assets"/"operations"/"pune-world.json"
+CATALOG=Path(__file__).resolve().parents[1]/"assets"/"operations"/"agency-catalog.json"
 
 
 @unittest.skipUnless(PUNE.exists(),"prepared Pune world not present")

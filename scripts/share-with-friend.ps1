@@ -3,7 +3,7 @@
   Start the Pune operations simulator and create a public link a friend can open.
 
 .DESCRIPTION
-  1. Starts operations_server.py on this machine (or reuses one already running on -Port).
+  1. Starts the simulator (python -m swarm_ops.server) on this machine (or reuses one already running on -Port).
   2. Starts a Cloudflare quick tunnel to it.
   3. Waits for the https://*.trycloudflare.com address, checks it works, then prints and
      copies a ready-to-send message (viewer link + WebSocket address).
@@ -50,7 +50,7 @@ try {
         if (-not (Test-Path -LiteralPath $world)) { & $python (Join-Path $root 'tools\prepare_operations_map.py') }
         Write-Host "Starting simulator ($Fleet drones, seed $Seed)..."
         $server = Start-Process -FilePath $python -WorkingDirectory $root -WindowStyle Hidden -PassThru `
-            -ArgumentList @('-u', (Join-Path $root 'operations_server.py'), '--port', $Port, '--seed', $Seed, '--fleet', $Fleet) `
+            -ArgumentList @('-u', '-m', 'swarm_ops.server', '--port', $Port, '--seed', $Seed, '--fleet', $Fleet) `
             -RedirectStandardOutput (Join-Path $runtime 'server.stdout.log') -RedirectStandardError (Join-Path $runtime 'server.stderr.log')
         $started += $server
         $deadline = (Get-Date).AddSeconds(40)

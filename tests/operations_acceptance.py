@@ -20,7 +20,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from ops_simulation import OperationsSimulation, SCENARIOS  # noqa: E402
+from swarm_ops.engine import OperationsSimulation, SCENARIOS  # noqa: E402
 
 
 def digest(path):
@@ -147,7 +147,7 @@ def main():
     out_of_bounds = sum(not bounds[0]-1e-6<=p[0]<=bounds[2]+1e-6 or not bounds[1]-1e-6<=p[1]<=bounds[3]+1e-6 for p in points)
     report = {"schema_version":1,"status":"running","generated_at":datetime.now(timezone.utc).isoformat(),
               "local_only":True,"world_path":str(args.world.resolve()),"world_sha256":digest(args.world),
-              "engine_sha256":digest(ROOT/"ops_simulation.py"),
+              "engine_sha256":digest(ROOT/"swarm_ops"/"engine.py"),
               "world":{"buildings":len(world["buildings"]),"roads":len(world["roads"]),"bounds":bounds,
                        "road_points":len(points),"out_of_bounds_road_points":out_of_bounds,"terrain_present":"terrain" in world},
               "cases":[],"profiles":[],"limitations":["Prescribed synthetic flood corridor and elevated crossings, not hydrodynamics.","Deterministic simulation harness, not decentralized consensus or certified flight physics.","Rescue extraction and crew acknowledgment are simulated; transfer routes are executed kinematically."]}

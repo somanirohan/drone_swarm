@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from examples.operations_ws_client import consume, local_token
-from operations_server import OperationsServer
-from ops_simulation import OperationsSimulation
+from swarm_ops.server import OperationsServer
+from swarm_ops.engine import OperationsSimulation
 
 
 async def verify():

@@ -10,8 +10,8 @@ from pathlib import Path
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
-from operations_server import EventJournal, OperationsServer, PROTOCOL
-from ops_simulation import OperationsSimulation
+from swarm_ops.server import EventJournal, OperationsServer, PROTOCOL
+from swarm_ops.engine import OperationsSimulation
 
 
 class JournalTests(unittest.TestCase):

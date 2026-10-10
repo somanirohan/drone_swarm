@@ -60,7 +60,7 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
         self.env = patch.dict(os.environ, {"ENABLE_SWARM_OPERATIONS":"1", "SWARM_OPERATIONS_DEMO_DATABASE":"1",
                                          "SWARM_OPERATIONS_TOKEN":"local-test-only"})
         self.env.start()
-        path = Path(__file__).resolve().parents[1] / "integrations/disruptionops_patch/backend/app/drone/operations.py"
+        path = Path(__file__).resolve().parents[1] / "swarm_ops/integrations/disruptionops_patch/backend/app/drone/operations.py"
         spec = importlib.util.spec_from_file_location("test_swarm_operations_adapter", path)
         self.adapter = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = self.adapter
