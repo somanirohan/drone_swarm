@@ -1,10 +1,10 @@
 param([int]$Port = 8787, [int]$Seed = 42, [int]$Fleet = 20, [switch]$Tunnel)
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
+$root = Split-Path -Parent $PSScriptRoot  # repository root (scripts/..)
 $python = Join-Path $root '.conda-drones\python.exe'
 if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python).Source }
 $world = Join-Path $root 'assets\operations\pune-world.json'
-if (-not (Test-Path -LiteralPath $world)) { & $python (Join-Path $root 'prepare_operations_map.py') }
+if (-not (Test-Path -LiteralPath $world)) { & $python (Join-Path $root 'tools\prepare_operations_map.py') }
 $tunnelProcess = $null
 try {
     if ($Tunnel) {

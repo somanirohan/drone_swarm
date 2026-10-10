@@ -1,7 +1,8 @@
 param([switch]$WithGeodata, [switch]$Recreate)
 # Creates an isolated environment for the operations simulator and installs its dependencies.
 $ErrorActionPreference = 'Stop'
-$env = Join-Path $PSScriptRoot '.venv-ops'
+$root = Split-Path -Parent $PSScriptRoot  # repository root (scripts/..)
+$env = Join-Path $root '.venv-ops'
 if ($Recreate -and (Test-Path -LiteralPath $env)) { Remove-Item -Recurse -Force -LiteralPath $env }
 if (-not (Test-Path -LiteralPath $env)) {
     python -m venv $env
@@ -9,8 +10,8 @@ if (-not (Test-Path -LiteralPath $env)) {
 }
 $py = Join-Path $env 'Scripts\python.exe'
 & $py -m pip install --upgrade pip
-& $py -m pip install -r (Join-Path $PSScriptRoot 'requirements-ops.txt')
-if ($WithGeodata) { & $py -m pip install -r (Join-Path $PSScriptRoot 'requirements-geodata.txt') }
+& $py -m pip install -r (Join-Path $root 'requirements\requirements-ops.txt')
+if ($WithGeodata) { & $py -m pip install -r (Join-Path $root 'requirements\requirements-geodata.txt') }
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
-Write-Host 'Ready. Local view : .\run-operations.ps1 -Fleet 50'
-Write-Host 'Share with friend : .\share-with-friend.ps1'
+Write-Host 'Ready. Local view : .\scripts\run-operations.ps1 -Fleet 50'
+Write-Host 'Share with friend : .\scripts\share-with-friend.ps1'

@@ -25,7 +25,7 @@ from rasterio.transform import Affine
 from shapely.geometry import Polygon, box, mapping
 from shapely.ops import transform as geometry_transform
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]  # repository root (tools/..)
 ANCHOR = (18.6526632, 73.7624378)
 BUCKET = "open-buildings-temporal-data"
 DATA_SOURCE = "https://sites.research.google/gr/open-buildings/temporal/"

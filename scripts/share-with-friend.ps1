@@ -12,13 +12,13 @@
   The address changes every time you run this.
 
 .EXAMPLE
-  .\share-with-friend.ps1
-  .\share-with-friend.ps1 -Fleet 100 -Seed 7
-  .\share-with-friend.ps1 -NoTunnel      # local test only, no public link
+  .\scripts\share-with-friend.ps1
+  .\scripts\share-with-friend.ps1 -Fleet 100 -Seed 7
+  .\scripts\share-with-friend.ps1 -NoTunnel      # local test only, no public link
 #>
 param([int]$Port = 8787, [int]$Seed = 42, [int]$Fleet = 50, [switch]$NoTunnel)
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
+$root = Split-Path -Parent $PSScriptRoot  # repository root (scripts/..)
 $runtime = Join-Path $root '.cache\operations'
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 
@@ -29,7 +29,7 @@ function Find-Python {
     }
     $cmd = Get-Command python -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
-    throw 'No Python found. Run .\setup-ops.ps1 first.'
+    throw 'No Python found. Run .\scripts\setup-ops.ps1 first.'
 }
 
 function Test-Health($base) {
@@ -45,9 +45,9 @@ try {
     } else {
         $python = Find-Python
         & $python -c 'import websockets' 2>$null
-        if ($LASTEXITCODE -ne 0) { throw 'Missing dependency. Run .\setup-ops.ps1 (installs requirements-ops.txt).' }
+        if ($LASTEXITCODE -ne 0) { throw 'Missing dependency. Run .\scripts\setup-ops.ps1 (installs requirements\requirements-ops.txt).' }
         $world = Join-Path $root 'assets\operations\pune-world.json'
-        if (-not (Test-Path -LiteralPath $world)) { & $python (Join-Path $root 'prepare_operations_map.py') }
+        if (-not (Test-Path -LiteralPath $world)) { & $python (Join-Path $root 'tools\prepare_operations_map.py') }
         Write-Host "Starting simulator ($Fleet drones, seed $Seed)..."
         $server = Start-Process -FilePath $python -WorkingDirectory $root -WindowStyle Hidden -PassThru `
             -ArgumentList @('-u', (Join-Path $root 'operations_server.py'), '--port', $Port, '--seed', $Seed, '--fleet', $Fleet) `
