@@ -107,6 +107,20 @@ DisruptionOps is the orchestrator; the swarm is an agency that decides for itsel
 
 **Status back**: every event with an orchestrator meaning carries `status` (and `request_id`, `data` where useful): `accepted`, `declined`, `launched`, `on_scene`, `briefing` (`data.revision`), `resource_request`, `resource_assigned`, `supply_delivered`, `ground_arrived` (`data.first`), `retasked`, `recalled`, `handed_over`, `completed`. They are journalled on `/ops/events` and sent in snapshots. `random_incident` and `detect` use exactly this path (`source:"orchestrator-sim"`).
 
+## Scenario and world registry (engine plug-in hook)
+
+Scenarios beyond the four built-ins are registered in Python, not over the socket:
+
+```python
+from swarm_ops.engine import register_scenario, register_world
+register_world("pcmc", load_pcmc_world)          # dict, or a callable returning the world dict (lazy, cached)
+register_scenario("pcmc_monsoon", "PCMC monsoon", "…", build, world_id="pcmc")
+```
+
+`build(sim)` runs on every (re)initialisation and may only use the public helpers: `sim.rng`, `sim.bounds`, `sim.buildings()`, `sim.add_incident(position, category, title=None, severity=None, people=None, needs=None, required=None, building_id=None)`, `sim.add_dock(position, name=None)`, `sim.add_resource(kind, position, name=None, id=None, agency=None, capacity=None, transport=None, **extra)`, `sim.place_on_roof(building_id_or_xy)` → `([x,y,height], building_id)`, `sim.nearest_road_point(xy)` → `[x,y,0]` or `None`, `sim.road_path(a, b)`. If the builder adds docks the fleet starts docked under the launch cap; otherwise it starts at the world's first base and searches.
+
+Once registered, the `scenario` command accepts the new `id`. Selecting it loads the scenario's world. Built-in scenarios use the server's constructor world. A new `run_id` is issued, so the next snapshot carries the new `world`. `state.scenario.world_id` names the active world, and `swarm_ops.engine.scenario_catalog()` lists `{id, name, description, world_id}`. Worlds use the same shape as `assets/operations/pune-world.json` with generic `bounds` (regions up to about 14 km × 14 km). On large worlds the search map coarsens (≤ 48 × 48 cells; `search_map[].size_m` gives the cell size) and so does the flight planner.
+
 ## Transport limits and recovery
 
 JSON text only; input maximum 16 KiB. Incoming queue maximum 8 messages. More than 10 commands in a rolling second closes with code 1008; oversized input closes with 1009; binary input closes with 1003. Ping interval is 20 s, ping timeout 30 s. Each client's outgoing telemetry queue is bounded to 2 frames, dropping older snapshots under pressure. That prevents an idle viewer from accumulating an unbounded telemetry backlog.

@@ -4,6 +4,32 @@ Allocations are feasible local bids reconciled by this simulation harness. This
 is deliberately NOT a hardware swarm, decentralized consensus, or medical AI.
 Ground dispatch, observational evidence and actual service completion are
 separate from drone arrival and supply drops.
+
+Plug-in hook (scenarios and worlds)
+-----------------------------------
+Another module can add a scenario without touching engine internals::
+
+    from swarm_ops.engine import register_scenario, register_world
+
+    register_world("pcmc", lambda: json.loads(Path(...).read_text()))   # dict or callable -> world dict
+    def build(sim):                       # called on every (re)initialisation of that scenario
+        sim.add_dock([120, -300])                                    # drones are spread over docks
+        roof, building_id = sim.place_on_roof([400, 220])            # roof centre + height of a building
+        sim.add_incident(roof, "fire", people=6, building_id=building_id)
+        sim.add_resource("fire_engine", sim.nearest_road_point([900, 800]), name="Fire tender 01")
+    register_scenario("pcmc_fire", "PCMC fire", "...", build, world_id="pcmc")
+
+Selecting the scenario (``command("scenario", {"id": "pcmc_fire"})``) loads its world
+(``world_id``; built-in scenarios run on the world the simulation was constructed with,
+whose id is ``world["id"]`` or "pune-district"), applies flood closures, then calls
+``builder(sim)``. Builders must only use the public helpers: ``sim.rng`` (seeded),
+``sim.bounds``, ``add_incident``, ``add_dock``, ``add_resource``, ``place_on_roof``,
+``nearest_road_point``, ``road_path``, ``buildings()``. When a builder adds docks, the
+fleet starts docked (launch cap applies). Without docks the fleet starts at the first
+``bases`` entry and searches. A world is the same dict shape as assets/operations/
+pune-world.json (``bounds`` [minx,miny,maxx,maxy] in metres around ``anchor``; roads,
+buildings, optional river/no_fly/bases/shelters). Worlds up to ~14 km x 14 km are
+supported: the flight planner, road graph and search map scale their resolution.
 """
 from __future__ import annotations
 
@@ -56,7 +82,68 @@ _FALLBACK_CATALOG = {"resources": [
 # DisruptionOps catalog kind -> simulator resource kind.
 CATALOG_KINDS = {"fire_engine": "fire_engine", "ambulance": "ambulance", "rescue_team": "rescue", "boat": "rescue", "jcb": "engineering"}
 GROUND_SPEED = 9.0
+# Simulator resource kinds (DisruptionOps capability names; rescue_team -> rescue, jcb -> engineering).
+# transport: road|boat; model: hint for the 3D viewer; carries_people: loads and transfers people.
+RESOURCE_KINDS = {
+    "fire_engine": {"transport": "road", "agency": "Fire brigade", "capacity": 6, "model": "fire_engine", "carries_people": False},
+    "ambulance": {"transport": "road", "agency": "EMS", "capacity": 2, "model": "ambulance", "carries_people": True},
+    "rescue": {"transport": "road", "agency": "District rescue", "capacity": 6, "model": "rescue_van", "carries_people": True},
+    "boat": {"transport": "boat", "agency": "SDRF boat unit", "capacity": 6, "model": "boat", "carries_people": True},
+    "engineering": {"transport": "road", "agency": "Public works", "capacity": 2, "model": "jcb", "carries_people": False},
+    "pump": {"transport": "road", "agency": "PCMC water works", "capacity": 1, "model": "pump_truck", "carries_people": False},
+    "water_tanker": {"transport": "road", "agency": "PCMC water supply", "capacity": 1, "model": "water_tanker", "carries_people": False},
+    "supply_truck": {"transport": "road", "agency": "District relief", "capacity": 1, "model": "supply_truck", "carries_people": False},
+    "bus": {"transport": "road", "agency": "PMPML", "capacity": 40, "model": "bus", "carries_people": True},
+}
+RESOURCE_ALIASES = {"rescue_team": "rescue", "jcb": "engineering"}
+# A required kind may also be served by these kinds (exact kind preferred).
+KIND_SUBSTITUTES = {"rescue": ("boat",), "boat": ("rescue",), "supply_truck": ("water_tanker",), "water_tanker": ("supply_truck",)}
+CATEGORY_ALIASES = {}
 _ROAD_CACHE = {}
+DEFAULT_WORLD_ID = "pune-district"
+# id -> {"id","name","description","builder","world_id"}; built-ins have builder None (engine-internal).
+SCENARIO_REGISTRY = {sid: {"id": sid, "name": n, "description": d, "builder": None, "world_id": None} for sid, (n, d) in SCENARIOS.items()}
+# world id -> dict or zero-argument callable returning a world dict (loaded lazily, cached).
+WORLD_REGISTRY = {}
+_WORLD_CACHE = {}
+
+
+def register_scenario(id, name, description, builder, world_id=DEFAULT_WORLD_ID):
+    """Register (or replace) a scenario. builder(sim) creates incidents/docks/resources via the public helpers."""
+    if not isinstance(id, str) or not id or len(id) > 64:
+        raise ValueError("scenario id must be a non-empty string (<= 64 chars)")
+    if builder is not None and not callable(builder):
+        raise ValueError("builder must be callable")
+    SCENARIO_REGISTRY[id] = {"id": id, "name": str(name), "description": str(description), "builder": builder, "world_id": world_id}
+    SCENARIOS[id] = (str(name), str(description))
+    return SCENARIO_REGISTRY[id]
+
+
+def register_world(world_id, world):
+    """Register a world dict, or a zero-argument callable that returns one (called once, lazily)."""
+    WORLD_REGISTRY[str(world_id)] = world
+    _WORLD_CACHE.pop(str(world_id), None)
+
+
+def _resolve_world(world_id):
+    if world_id not in _WORLD_CACHE:
+        source = WORLD_REGISTRY.get(world_id)
+        if source is None:
+            raise ValueError(f"Unknown world '{world_id}'")
+        world = source() if callable(source) else source
+        if not isinstance(world, dict) or len(world.get("bounds", [])) != 4:
+            raise ValueError(f"World '{world_id}' must be a dict with 4-value bounds")
+        _WORLD_CACHE[world_id] = world
+    return _WORLD_CACHE[world_id]
+
+
+PUNE_WORLD_PATH = Path(__file__).resolve().parents[1] / "assets" / "operations" / "pune-world.json"
+WORLD_REGISTRY[DEFAULT_WORLD_ID] = lambda: json.loads(PUNE_WORLD_PATH.read_text(encoding="utf8"))
+
+
+def scenario_catalog():
+    """[{id, name, description, world_id}] for every registered scenario (for UIs/servers)."""
+    return [{k: v for k, v in spec.items() if k != "builder"} for spec in SCENARIO_REGISTRY.values()]
 
 
 def _agency_catalog():
@@ -118,14 +205,35 @@ def _default_world():
 class OperationsSimulation:
     """JSON snapshots and commands for a local, single-authority demo server."""
 
+    # Per-world caches dropped when a different world is loaded.
+    _WORLD_CACHES = ("_buildings_cache", "_road_base", "_flight_grid_cache", "_search_prior_cache", "_person_positions",
+                     "_connector_cache", "_ground_cache", "_planner", "_edge_index", "_building_grid")
+
     def __init__(self, world=None, seed=42, fleet_size=20, scenario="rooftop_flood"):
-        self.world = copy.deepcopy(world or _default_world())
+        self._home_world = copy.deepcopy(world or _default_world())
+        self._home_world_id = str(self._home_world.get("id") or (DEFAULT_WORLD_ID if world is not None else "default-grid"))
+        self.world = self._home_world
+        self.world_id = self._home_world_id
         self.fleet_size = max(1, min(100, int(fleet_size)))
         self.seed = int(seed)
-        if scenario not in SCENARIOS:raise ValueError("Unknown scenario")
+        if scenario not in SCENARIO_REGISTRY:raise ValueError("Unknown scenario")
         self._initialize(scenario)
 
+    def _load_world(self, world_id):
+        """Switch to another world (registered id, or the constructor's world) and drop per-world caches."""
+        if world_id == self.world_id:return
+        world = self._home_world if world_id == self._home_world_id else copy.deepcopy(_resolve_world(world_id))
+        for name in self._WORLD_CACHES:self.__dict__.pop(name, None)
+        self.world, self.world_id = world, world_id
+
+    @property
+    def bounds(self):
+        return list(self.world.get("bounds", [-600, -600, 600, 600]))
+
     def _initialize(self, scenario):
+        spec = SCENARIO_REGISTRY.get(scenario)
+        if spec is None:raise ValueError("Unknown scenario")
+        self._load_world(spec["world_id"] or self._home_world_id)
         self.rng = random.Random(self.seed)
         self.run_id = str(uuid.uuid4())
         self.revision = 0
@@ -151,7 +259,7 @@ class OperationsSimulation:
         self._setup_search()
         self._base = list(self.world.get("bases", [{"position": [-440,-440,0]}])[0]["position"])
         self._base = (self._base + [0,0,0])[:3]
-        self.scenario = {"id": scenario, "name": SCENARIOS[scenario][0], "description": SCENARIOS[scenario][1], "seed": self.seed}
+        self.scenario = {"id": scenario, "name": spec["name"], "description": spec["description"], "seed": self.seed, "world_id": self.world_id}
         self.docks = []
         self.drones = []
         for i in range(self.fleet_size):
@@ -163,7 +271,7 @@ class OperationsSimulation:
                 "zone":[],"search_target":None,"speed_mps":0.0})
             self.drones[-1]["energy_wh"] = self.drones[-1]["battery"]*110
         self.resources = []
-        for i, kind in enumerate([] if scenario=="dock_fire" else ["ambulance","ambulance","rescue","rescue","engineering"]):
+        for i, kind in enumerate([] if scenario=="dock_fire" or spec["builder"] else ["ambulance","ambulance","rescue","rescue","engineering"]):
             self.resources.append({"id": f"R{i+1:02}", "kind": kind, "state": "available" if i%2==0 else "busy",
                 "position": [self._base[0]+i*12,self._base[1],0], "incident_id": None, "route": [], "eta": None,
                 "agency": {"ambulance":"EMS","rescue":"District rescue","engineering":"Public works"}[kind],
@@ -233,13 +341,75 @@ class OperationsSimulation:
         count=min(len(nodes),max(3,min(8,math.ceil(self.fleet_size/8))))
         for n,q in enumerate(self._spread(nodes,count)):
             self.docks.append({"id":f"DOCK-{n+1}","name":f"Drone dock {n+1}","position":[round(q[0],1),round(q[1],1),0],"drone_ids":[]})
-        for i,drone in enumerate(self.drones):
-            dock=self.docks[i%len(self.docks)];slot=len(dock["drone_ids"]);dock["drone_ids"].append(drone["id"])
-            # Each aircraft owns a landing pad at its dock and returns to that exact pad.
-            pad=[round(dock["position"][0]+(slot%4)*4-6,1),round(dock["position"][1]+(slot//4)*4-6,1),0]
-            drone.update(dock_id=dock["id"],home=pad,state="ready",position=list(pad),lane=(slot%4)*8.0)
+        self._assign_drones_to_docks()
         self._station_nodes=sorted(q for q in reach if b[0]+20<q[0]<b[2]-20 and b[1]+20<q[1]<b[3]-20 and not self._submerged(q))
         self._load_catalog_resources(("fire_engine","ambulance","rescue_team","boat","jcb"))
+
+    def _assign_drones_to_docks(self):
+        """Round-robin every aircraft onto a dock; each owns a landing pad there and returns to that exact pad."""
+        for dock in self.docks:dock["drone_ids"]=[]
+        for i,drone in enumerate(self.drones):
+            dock=self.docks[i%len(self.docks)];slot=len(dock["drone_ids"]);dock["drone_ids"].append(drone["id"])
+            pad=[round(dock["position"][0]+(slot%4)*4-6,1),round(dock["position"][1]+(slot//4)*4-6,1),0]
+            drone.update(dock_id=dock["id"],home=pad,state="ready",position=list(pad),lane=(slot%4)*8.0)
+
+    # ---- public helpers for plug-in scenario builders (see module docstring) ----
+    def buildings(self):
+        """[(id, centroid(x,y), footprint points, height_m)] for every building of the current world."""
+        return list(self._building_index())
+
+    def nearest_road_point(self,xy,max_distance=150.0):
+        """Closest point on an open (dry, unblocked) road within max_distance, as [x,y,0], else None."""
+        link=self._road_connector([float(xy[0]),float(xy[1]),0])
+        if link is None or link[0]>max_distance:return None
+        return [round(link[3][0],2),round(link[3][1],2),0.0]
+
+    def road_path(self,start,end):
+        """Open-road route between two points (list of [x,y,0]) or None."""
+        return self._ground_path(start,end)
+
+    def place_on_roof(self,where):
+        """Roof point of a building, by building id or by a position inside/near it: ([cx,cy,height], building_id)."""
+        if isinstance(where,str):
+            entry=next((b for b in self._building_index() if b[0]==where),None)
+        else:
+            entry=self._building_at(list(where)[:2],tolerance=60)
+        if entry is None:raise ValueError(f"No building at {where!r}")
+        return [round(entry[1][0],2),round(entry[1][1],2),entry[3]],entry[0]
+
+    def add_incident(self,position,category,title=None,severity=None,people=None,needs=None,required=None,source="scenario",building_id=None):
+        """Create (or merge into) an incident. Unspecified fields come from INCIDENT_TEMPLATES[category]."""
+        category=CATEGORY_ALIASES.get(category,category)
+        if category not in self.INCIDENT_TEMPLATES:raise ValueError(f"Unknown incident category '{category}'")
+        t_title,t_severity,(low,high),t_needs,t_required=self.INCIDENT_TEMPLATES[category]
+        people=self.rng.randint(low,high) if people is None else int(people)
+        position=[float(v) for v in (list(position)+[0.0])[:3]]
+        return self._incident(position,category,title or t_title,int(severity or t_severity),people,list(needs or t_needs),
+                              list(required or t_required),source=source,building_id=building_id)
+
+    def add_dock(self,position,name=None):
+        """Add a drone dock; the fleet is spread over all docks after the builder returns."""
+        n=len(self.docks)+1
+        dock={"id":f"DOCK-{n}","name":name or f"Drone dock {n}","position":[round(float(position[0]),1),round(float(position[1]),1),0],"drone_ids":[]}
+        self.docks.append(dock)
+        return dock
+
+    def add_resource(self,kind,position,name=None,id=None,agency=None,capacity=None,transport=None,state="available",**extra):
+        """Add a ground (or boat) responder of any RESOURCE_KINDS kind at position."""
+        kind=RESOURCE_ALIASES.get(kind,kind)
+        if kind not in RESOURCE_KINDS:raise ValueError(f"Unknown resource kind '{kind}'")
+        if position is None:raise ValueError("resource position is required")
+        spec=RESOURCE_KINDS[kind]
+        transport=transport or spec["transport"]
+        identifier=id or f"R{len(self.resources)+1:02}"
+        resource={"id":identifier,"kind":kind,"name":name or identifier,"agency":agency or spec["agency"],"state":state,
+            "position":[float(v) for v in (list(position)+[0.0])[:3]],"incident_id":None,"route":[],"eta":None,
+            "capacity":int(capacity if capacity is not None else spec["capacity"]),"free_at":None,"arrived_at":None,
+            "acknowledged":False,"transport":transport,"load":0,"model":spec["model"],"approach_m":0.0,"approach_until":None,"off_map":False}
+        if transport=="boat":resource["position"][2]=self.flood["level"]
+        resource.update(extra)
+        self.resources.append(resource)
+        return resource
 
     def _ensure_ground_kinds(self,required):
         """Mutual aid: if the scenario has no unit of a required kind, bring in the real PCMC units of that kind."""
@@ -422,6 +592,14 @@ class OperationsSimulation:
         self._event("resource_request_fulfilled",f"{unit_id} assigned to {request['request_id']} ({kind}).",incident["id"],data={"request_id":request["request_id"],"unit_id":unit_id})
 
     def _create_scenario(self, scenario):
+        builder=SCENARIO_REGISTRY[scenario]["builder"]
+        if builder is not None:
+            # Plug-in scenario: flood closures first (roads depend on them), then the builder.
+            self._apply_flood_roads()
+            self._station_nodes=None
+            builder(self)
+            if self.docks:self._assign_drones_to_docks()
+            return
         buildings = self.world.get("buildings",[])
         candidate = None
         candidates=[]
@@ -502,7 +680,7 @@ class OperationsSimulation:
         if len(river)>1:
             self._safe_crossings=[river[max(0,len(river)//3)],river[min(len(river)-1,2*len(river)//3)]]
         self.flood["safe_crossings"]=copy.deepcopy(self._safe_crossings)
-        for a,b in self._road_edges:
+        for a,b in (self._road_edges if len(river)>1 else ()):
             count=max(2,int(_distance(a,b)/12))
             submerged=any(self._submerged(p) and not self._elevated_crossing(p) for p in ([a[0]+(b[0]-a[0])*i/count,a[1]+(b[1]-a[1])*i/count] for i in range(count+1)))
             if submerged:
@@ -1033,17 +1211,21 @@ class OperationsSimulation:
 
     # ---- goal-directed search: probability map, zones, lawnmower sweeps ----
     def _setup_search(self):
+        b=self.world.get("bounds",[-600,-600,600,600])
+        # 100 m cells on a district map; coarser on a large region so the map stays <= ~48 x 48 cells.
+        extent=max(b[2]-b[0],b[3]-b[1])
+        self.search_spacing=SEARCH_SPACING if extent<=4800 else int(math.ceil(extent/48/50)*50)
         cache=self.__dict__.get("_search_prior_cache")
         if cache is None:
-            b=self.world.get("bounds",[-600,-600,600,600])
-            xs=list(range(math.ceil((b[0]+50)/SEARCH_SPACING)*SEARCH_SPACING,int(b[2]-49),SEARCH_SPACING))
-            ys=list(range(math.ceil((b[1]+50)/SEARCH_SPACING)*SEARCH_SPACING,int(b[3]-49),SEARCH_SPACING))
+            s=self.search_spacing;half=s//2
+            xs=list(range(math.ceil((b[0]+half)/s)*s,int(b[2]-half+1),s))
+            ys=list(range(math.ceil((b[1]+half)/s)*s,int(b[3]-half+1),s))
             density={}
             for building in self.world.get("buildings",[]):
                 fp=building.get("footprint",[])
                 if not fp:continue
                 cx=sum(q[0] for q in fp)/len(fp);cy=sum(q[1] for q in fp)/len(fp)
-                key=(round(cx/SEARCH_SPACING)*SEARCH_SPACING,round(cy/SEARCH_SPACING)*SEARCH_SPACING)
+                key=(round(cx/self.search_spacing)*self.search_spacing,round(cy/self.search_spacing)*self.search_spacing)
                 density[key]=density.get(key,0)+1
             peak=max(density.values(),default=1) or 1
             water_band=float(self.world.get("river_width",45))/2+120
@@ -1069,11 +1251,11 @@ class OperationsSimulation:
         if z<=3:return
         r=z*math.tan(SENSOR_HALF_ANGLE)
         x,y=drone["position"][0],drone["position"][1]
-        reach=r+30;span=int(reach//SEARCH_SPACING)+1
-        gx,gy=round(x/SEARCH_SPACING),round(y/SEARCH_SPACING)
+        reach=r+30;span=int(reach//self.search_spacing)+1
+        gx,gy=round(x/self.search_spacing),round(y/self.search_spacing)
         for ix in range(gx-span,gx+span+1):
             for iy in range(gy-span,gy+span+1):
-                cid=self._cell_by_center.get((ix*SEARCH_SPACING,iy*SEARCH_SPACING))
+                cid=self._cell_by_center.get((ix*self.search_spacing,iy*self.search_spacing))
                 if cid is None:continue
                 cell=self.search_cells[cid];cx,cy=cell["center"]
                 if (cx-x)**2+(cy-y)**2<=reach*reach and (cell["last"] is None or self.t-cell["last"]>=15):
@@ -1117,7 +1299,7 @@ class OperationsSimulation:
             if path is None:
                 cell["blocked"]=True;self._zone_key=None
                 continue
-            altitude=path[-1][2];h=SEARCH_SPACING*.3
+            altitude=path[-1][2];h=self.search_spacing*.3
             # Two-lane boustrophedon (lane spacing 0.6 cell ~ 2x sensor radius at cruise).
             legs=[[cx-h,cy-h,altitude],[cx+h,cy-h,altitude],[cx+h,cy+h,altitude],[cx-h,cy+h,altitude]]
             legs=[p for p in legs if not self._restricted(p,p)]
@@ -1696,7 +1878,7 @@ class OperationsSimulation:
             "docks":[{**dock,"docked":sum(1 for d in self.drones if d.get("dock_id")==dock["id"] and d["state"] in ("ready","charging")),
                       "launched":sum(1 for d in self.drones if d.get("dock_id")==dock["id"] and d["state"] in ("enroute","observing","returning","holding"))} for dock in self.docks],
             "coverage":[{"position":[*c["center"],0],"last_observed":c["last"]} for c in self.search_cells.values()],
-            "search_map":[{"id":c["id"],"center":[*c["center"],0],"size_m":SEARCH_SPACING,"probability":round(c["p"],3),"prior":c["prior"],
+            "search_map":[{"id":c["id"],"center":[*c["center"],0],"size_m":self.search_spacing,"probability":round(c["p"],3),"prior":c["prior"],
                            "last_observed":None if c["last"] is None else round(c["last"],2),
                            "status":"blocked" if c["blocked"] else "cleared" if c["p"]<.12 else "searched" if c["last"] is not None else "unsearched"} for c in self.search_cells.values()],
             "people":self._people(),
