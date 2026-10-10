@@ -1,0 +1,24 @@
+services:
+  swarm:
+    build: .
+    ports: ["8787:8787"]
+    environment:
+      OPS_CONTROL_TOKEN: ${OPS_CONTROL_TOKEN:?set OPS_CONTROL_TOKEN}
+      OPS_INTEGRATION_TOKEN: ${OPS_INTEGRATION_TOKEN:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      WORLD: ${WORLD:-pcmc-region}
+      FLEET: ${FLEET:-20}
+      DISRUPTIONOPS_URL: ${DISRUPTIONOPS_URL:-}
+      DISRUPTIONOPS_TOKEN: ${DISRUPTIONOPS_TOKEN:-}
+    volumes: ["swarm-cache:/app/.cache"]
+    restart: unless-stopped
+  command-center:
+    # Optional stand-in for DisruptionOps: drives the swarm over its WebSocket. Enable with: --profile command-center
+    profiles: ["command-center"]
+    build: .
+    command: ["python", "-m", "swarm_ops.command_center", "--url", "ws://swarm:8787/ops/ws"]
+    environment:
+      OPS_INTEGRATION_TOKEN: ${OPS_INTEGRATION_TOKEN:-}
+    depends_on: [swarm]
+volumes:
+  swarm-cache:

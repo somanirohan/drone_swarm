@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swarm-ops"
+version = "0.3.0"
+description = "Drone swarm disaster-operations simulator and DisruptionOps agency endpoint"
+requires-python = ">=3.12"
+dependencies = ["websockets==17.2"]
+
+[project.scripts]
+swarm-ops = "swarm_ops.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["swarm_ops*"]

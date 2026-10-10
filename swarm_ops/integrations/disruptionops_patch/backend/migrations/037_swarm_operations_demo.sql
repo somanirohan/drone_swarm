@@ -1,4 +1,4 @@
--- Optional adapter: apply ONLY to a separate development/demo database.
+-- Optional adapter: apply ONLY to a separate development/demo database. Renumbered 030 -> 037 for upstream 1697407 (migrations 001-036).
 begin;
 create table if not exists swarm_operations_events (
   event_id text primary key,

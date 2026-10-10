@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: swarm-ops
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - {key: HOST, value: 0.0.0.0}
+      - {key: WORLD, value: pcmc-region}
+      - {key: FLEET, value: "20"}
+      - {key: LOG_LEVEL, value: INFO}
+      - {key: OPS_CONTROL_TOKEN, generateValue: true}
+      - {key: OPS_INTEGRATION_TOKEN, generateValue: true}
+      - {key: ALLOWED_ORIGINS, sync: false}
+      - {key: DISRUPTIONOPS_URL, sync: false}
+      - {key: DISRUPTIONOPS_TOKEN, sync: false}

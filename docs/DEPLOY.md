@@ -1,0 +1,39 @@
+# Deploying the swarm operations server
+
+Service: `swarm_ops.cli` (`swarm-ops`). Runtime dependency: `websockets` only. No AI key or model is used or needed.
+Configuration is environment-only (`swarm_ops/config.py`, names in `.env.example`).
+
+| Variable | Meaning |
+|---|---|
+| `HOST`, `PORT` | Bind address and port. Render injects `PORT`; the image defaults to `0.0.0.0:8787`. |
+| `OPS_CONTROL_TOKEN` | Operator token for control commands (use 24+ random characters). |
+| `OPS_INTEGRATION_TOKEN` | Token DisruptionOps uses for `agency_request` / `external_resource_update`. |
+| `ALLOWED_ORIGINS` | Comma separated browser origins allowed to open `/ops/ws` cross-origin (same-origin and non-browser clients always pass). |
+| `FLEET`, `WORLD` (`pune-district`/`pcmc-region`), `SEED`, `SCENARIO` | Simulation start. |
+| `DISRUPTIONOPS_URL`, `DISRUPTIONOPS_TOKEN` | Live reference data (see `integration/DATA-SOURCES.md`). Optional. |
+| `LOG_LEVEL` | Python logging level. |
+
+Check the effective configuration (secrets shown only as booleans): `GET /ops/config`; data source: `GET /ops/data-source`; health: `GET /health`.
+
+## Local
+`python -m swarm_ops.cli --world pcmc-region` (or `swarm-ops` after `pip install .`). Open http://localhost:8787 on the same machine to be granted control.
+
+## Docker
+```
+docker build -t swarm-ops .
+docker run -p 8787:8787 -e OPS_CONTROL_TOKEN=... -e OPS_INTEGRATION_TOKEN=... swarm-ops
+docker compose up            # needs OPS_CONTROL_TOKEN in the environment or .env
+docker compose --profile command-center up   # also runs the DisruptionOps stand-in
+```
+The event journal lives in `/app/.cache` (a named volume in compose). Not built in the authoring environment (Docker was not installed).
+
+## Render
+Push the repository, then Render -> New -> Blueprint -> pick the repo (`render.yaml`). It generates both tokens; read them in the service Environment tab. Set `ALLOWED_ORIGINS` if a browser UI on another origin connects, and `DISRUPTIONOPS_*` if used. Health check: `/health`. Free/starter instances sleep or restart: the simulation resets and the journal is lost unless a disk is attached at `/app/.cache`.
+
+Operators on a public URL open `https://<service>.onrender.com/#control=<OPS_CONTROL_TOKEN>`. Public viewers are read-only.
+
+## Connecting DisruptionOps
+- WebSocket URL: `wss://<service>.onrender.com/ops/ws?token=<OPS_INTEGRATION_TOKEN>`.
+- Swarm side: `OPS_INTEGRATION_TOKEN`, optionally `DISRUPTIONOPS_URL` / `DISRUPTIONOPS_TOKEN` (reads taxonomy, wards, lifelines, units, incidents).
+- DisruptionOps side (patch in `swarm_ops/integrations/disruptionops_patch/`, apply migration 038): `SWARM_AGENCY=1`, `SWARM_WS_URL=wss://<service>/ops/ws`, `SWARM_INTEGRATION_TOKEN=<same value>`.
+- Protocol: `docs/integration/how-disruptionops-calls-the-swarm.md`.

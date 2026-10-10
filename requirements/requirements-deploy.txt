@@ -1,0 +1,2 @@
+# Runtime dependencies of the deployed swarm-ops service (Docker / Render). Nothing else is imported.
+websockets==17.2
