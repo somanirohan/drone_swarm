@@ -13,6 +13,7 @@ Reference DisruptionOps version for all integration documents: commit `bd21179` 
 | [PLAN-V3.md](PLAN-V3.md) | This round: region scenario, command center and agents, agentic architecture, civilian traffic, path fixes; owners, acceptance, status. |
 | [SYSTEM-LOGIC-MAP.md](SYSTEM-LOGIC-MAP.md) | Every logic file of DisruptionOps and the swarm, one line each, plus end-to-end flows ([system-logic.dot](system-logic.dot), [system-logic.svg](system-logic.svg)). |
 | [AGENTIC-ASSESSMENT.md](AGENTIC-ASSESSMENT.md) | Are the agents really agentic? Where `graph.py` is, what is LLM or LangGraph driven, what the swarm lacks. |
+| [ALGORITHM-GLOSSARY.md](ALGORITHM-GLOSSARY.md) | Formal literature names (MRTA, Contract Net, CBBA, Bayesian fusion, MCDA, CP-SAT, hysteresis, FSM/BT, Voronoi, boustrophedon, any-angle planning, MCLP, START, MAPE-K) mapped to code with honest status. |
 
 ## DisruptionOps integration (`integration/`)
 
