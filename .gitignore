@@ -27,8 +27,8 @@ results/
 *.tar.bz2
 
 # Ship prepared CC0 meshes/textures, exclude redundant authoring files
-assets/apocalyptic-city/**/*.blend
-assets/apocalyptic-city/**/fbx files/
+assets/legacy/apocalyptic-city/**/*.blend
+assets/legacy/apocalyptic-city/**/fbx files/
 
 # Keep vendored model textures and reference figures
 !gym-pybullet-drones/**/*.png

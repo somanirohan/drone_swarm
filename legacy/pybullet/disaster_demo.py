@@ -14,6 +14,9 @@ from agentic_swarm import AgenticSwarm
 from city_map import load_city, PLACEMENTS
 from ai_planner import AIPlanner
 from jev_planner import JevPlanner
+REPO_ROOT=Path(__file__).resolve().parents[2]
+RESULTS=Path(__file__).resolve().parent/'results'
+RESULTS.mkdir(exist_ok=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--headless', action='store_true')
@@ -80,7 +83,7 @@ cruise_height=load_city(c)
 text('RESCUE LAUNCH',[-15,-12,.1],[.05,.15,.12],1.)
 text('EARTHQUAKE DISTRICT | imported CC0 ruined-city assets',[-14,12.8,2],[.1,.12,.13],1.3)
 # Textured ground: the supplied rock photograph texture, preserving its source.
-ground_texture=p.loadTexture(str(Path(__file__).parent/'assets/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg'),physicsClientId=c)
+ground_texture=p.loadTexture(str(REPO_ROOT/'assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg'),physicsClientId=c)
 p.changeVisualShape(ground,-1,textureUniqueId=ground_texture,physicsClientId=c)
 smoke=[]
 
@@ -94,7 +97,7 @@ for k,pos in enumerate(survivors):
 if web:
     web_stream.start(args.host,args.port,{
         'survivors':survivors.tolist(),'placements':PLACEMENTS,'launch_pad':[-13,-11],
-        'manifest':json.loads((Path(__file__).parent/'assets'/'city-ready'/'manifest.json').read_text()),
+        'manifest':json.loads((REPO_ROOT/'assets'/'legacy'/'city-ready'/'manifest.json').read_text()),
         'drones':n,'ground':[16.25,12.75],'mode':f'AI ({ai.provider})' if ai else 'scripted' if args.scripted else 'rule agents'})
     print(f'WEB: viewer on http://localhost:{args.port}',flush=True)
 p.resetDebugVisualizerCamera(7.4, 25, -48, [0,0,.35], physicsClientId=c)
@@ -232,15 +235,15 @@ try:
                 report['mission']='independent rule-based agents, frontier memory, peer auctions, delayed messaging, availability recovery, local detours, PID/RPM physics'
                 if ai:
                     report['mission']='LLM frontier and rescue-bid decisions; deterministic auctions, safety and PID flight'
-                    Path(__file__).with_name(f'{args.report_prefix or "agentic"}-ai-events.json').write_text(json.dumps(ai.events,indent=2))
+                    (RESULTS/f'{args.report_prefix or "agentic"}-ai-events.json').write_text(json.dumps(ai.events,indent=2))
                 report.update(mission.metrics())
                 report['contact_samples']=contact_samples
                 report['unsafe_contact_steps']=unsafe_contact_steps
                 report['landing_contact_steps']=landing_contact_steps
                 event_file=f'{args.report_prefix}-events.json' if args.report_prefix else 'agentic-events.json'
-                Path(__file__).with_name(event_file).write_text(json.dumps(mission.events,indent=2))
+                (RESULTS/event_file).write_text(json.dumps(mission.events,indent=2))
             prefix=args.report_prefix or 'disaster'
-            Path(__file__).with_name(f'{prefix}-validation.json' if args.headless else f'{prefix}-live-status.json').write_text(json.dumps(report,indent=2))
+            (RESULTS/(f'{prefix}-validation.json' if args.headless else f'{prefix}-live-status.json')).write_text(json.dumps(report,indent=2))
             print(f'TELEMETRY t={t:.0f}s phase={mission.phase} altitude={positions[:,2].min():.2f}..{positions[:,2].max():.2f} located={len(mission.found)} landed={len(mission.delivered)}',flush=True)
         if web and step%4==0:
             web_stream.publish({'t':round(t,2),'phase':mission.phase,'found':sorted(int(k) for k in mission.found),'delivered':sorted(int(k) for k in mission.delivered),
@@ -255,7 +258,7 @@ try:
             view=p.computeViewMatrixFromYawPitchRoll([0,0,3.5],34,25,-48,0,2)
             proj=p.computeProjectionMatrixFOV(55,16/9,.1,100)
             pixels=p.getCameraImage(1280,720,view,proj,renderer=p.ER_TINY_RENDERER,physicsClientId=c)[2]
-            Image.fromarray(np.asarray(pixels,dtype=np.uint8)).save(Path(__file__).with_name(f'{args.report_prefix or "disaster"}-scene.png'))
+            Image.fromarray(np.asarray(pixels,dtype=np.uint8)).save((RESULTS/f'{args.report_prefix or "disaster"}-scene.png'))
         if not args.headless or web:
             delay=start+(step+1)/48-time.time()
             if delay>0: time.sleep(delay)

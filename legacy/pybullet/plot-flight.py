@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-root = Path(__file__).parent
+root = Path(__file__).resolve().parents[2]
 log = sorted((root / 'results').glob('save-flight-*.npy'))[-1]
 data = np.load(log)
 fig, axs = plt.subplots(1, 2, figsize=(10, 4))

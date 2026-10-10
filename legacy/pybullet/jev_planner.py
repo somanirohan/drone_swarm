@@ -23,7 +23,7 @@ RETURN_THRESHOLD = .9
 
 def load_env(path=None):
     """Load KEY=VALUE pairs from the project's local env file without overriding real env vars."""
-    path = Path(path or Path(__file__).parent / '.env')
+    path = Path(path or Path(__file__).resolve().parents[2] / '.env')
     if path.is_file():
         for line in path.read_text().splitlines():
             key, sep, value = line.strip().partition('=')

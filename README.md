@@ -62,7 +62,7 @@ Flight control runs at 48 Hz; physics runs at 240 Hz. Sensing uses idealized sim
 
 - [Agent behavior](legacy/pybullet/docs/AGENTIC-GUIDE.md)
 - [Disaster map](legacy/pybullet/docs/DISASTER-GUIDE.md)
-- [Map source and CC0 attribution](assets/CITY-SOURCE.md)
+- [Map source and CC0 attribution](assets/legacy/CITY-SOURCE.md)
 - Vendored drone code: [gym-pybullet-drones](https://github.com/learnsyslab/gym-pybullet-drones), retaining its [MIT license](gym-pybullet-drones/LICENSE). Local upstream files include controller modifications.
 
 Original FBX/Blender authoring files are excluded; prepared meshes and required textures are included. Download the original CC0 pack from the linked source to regenerate assets with `prepare_city_assets.py` (requires `assimp_py`). Local Python environments, caches, logs and credentials are excluded.

@@ -14,7 +14,7 @@ from websockets.asyncio.server import serve
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-ROOT = Path(__file__).parent.resolve()
+ROOT = Path(__file__).resolve().parents[2]  # repository root
 SERVED = {'web': ROOT / 'web', 'assets': ROOT / 'assets'}
 COMPRESSIBLE = {'.html', '.js', '.obj', '.json', '.css', '.mtl'}
 

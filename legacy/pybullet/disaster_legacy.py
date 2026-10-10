@@ -196,13 +196,13 @@ try:
             p.resetDebugVisualizerCamera(1.8 if follow else 6.6,25,-35 if follow else -48,camera_position,physicsClientId=c)
         if step%480==0 or step==48*args.duration-1:
             report={'located':len(mission.found),'aid_sites':len(mission.delivered),'released':len(mission.released),'finite_states':finite,'drones':n,'phase':mission.phase,'minimum_separation_m':min_separation,'contact_steps':contact_steps,'mission':'range/LOS sensing, shared task allocation, formation/separation feedback, physical falling payloads, RPM flight with drag'}
-            Path(__file__).with_name('disaster-validation.json' if args.headless else 'disaster-live-status.json').write_text(json.dumps(report,indent=2))
+            (Path(__file__).resolve().parent/'results'/('disaster-validation.json' if args.headless else 'disaster-live-status.json')).write_text(json.dumps(report,indent=2))
             print(f'TELEMETRY t={t:.0f}s phase={mission.phase} altitude={positions[:,2].min():.2f}..{positions[:,2].max():.2f} located={len(mission.found)} landed={len(mission.delivered)}',flush=True)
         if step==48*72:
             view=p.computeViewMatrixFromYawPitchRoll(positions[:4].mean(axis=0),1.8,25,-35,0,2)
             proj=p.computeProjectionMatrixFOV(55,16/9,.1,30)
             pixels=p.getCameraImage(1280,720,view,proj,renderer=p.ER_TINY_RENDERER,physicsClientId=c)[2]
-            Image.fromarray(np.asarray(pixels,dtype=np.uint8)).save(Path(__file__).with_name('disaster-scene.png'))
+            Image.fromarray(np.asarray(pixels,dtype=np.uint8)).save((Path(__file__).resolve().parent/'results'/'disaster-scene.png'))
         if not args.headless:
             delay=start+(step+1)/48-time.time()
             if delay>0: time.sleep(delay)

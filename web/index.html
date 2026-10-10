@@ -107,7 +107,7 @@ let built=false,meta=null;
 async function build(m){
   meta=m;
   const [gx,gy]=m.ground;
-  box(gx*2,gy*2,.1,0xffffff,0,0,-.05,tex('assets/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg')).material.map.repeat.set(8,6);
+  box(gx*2,gy*2,.1,0xffffff,0,0,-.05,tex('assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg')).material.map.repeat.set(8,6);
   box(32,1.9,.025,0x2a2d2f,0,-1.25,.012);box(1.8,25,.026,0x2a2d2f,-1.75,0,.013);
   for(let x=-15.5;x<16;x+=2)box(1.1,.07,.01,0xc9ba82,x,-1.25,.03);
   for(let y=-12;y<12;y+=2)box(.07,1.1,.01,0xc9ba82,-1.75,y,.032);
@@ -120,7 +120,7 @@ async function build(m){
   const jobs=[];
   for(const [name,pos] of m.placements){
     for(const part of m.manifest[name].parts){
-      jobs.push(loadPart('/assets/city-ready/'+part.mesh).then(obj=>{
+      jobs.push(loadPart('/assets/legacy/city-ready/'+part.mesh).then(obj=>{
         const copy=obj.clone();
         const mat=new THREE.MeshLambertMaterial({map:tex(part.texture),side:THREE.DoubleSide});
         copy.traverse(o=>{if(o.isMesh)o.material=mat});

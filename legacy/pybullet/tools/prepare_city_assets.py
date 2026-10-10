@@ -4,8 +4,9 @@ from pathlib import Path
 import assimp_py
 import numpy as np
 
-root=Path(__file__).parent/'assets'/'apocalyptic-city'/'LowPoly-Apocalyptic-Buildings-By-Majadroid'
-output=Path(__file__).parent/'assets'/'city-ready'
+REPO=Path(__file__).resolve().parents[3]
+root=REPO/'assets'/'legacy'/'apocalyptic-city'/'LowPoly-Apocalyptic-Buildings-By-Majadroid'
+output=REPO/'assets'/'legacy'/'city-ready'
 output.mkdir(parents=True,exist_ok=True)
 manifest={}
 sources=sorted((root/'fbx files').glob('building-*.fbx'))+list((root/'fbx files').glob('wreckage-*.fbx'))
@@ -39,7 +40,7 @@ for source in sources:
         texture_path=root/'textures'/texture
         if not texture_path.is_file():
             raise FileNotFoundError(texture_path)
-        parts.append({'mesh':name,'texture':str(texture_path.relative_to(output.parent.parent)).replace('\\','/')})
+        parts.append({'mesh':name,'texture':str(texture_path.relative_to(REPO)).replace('\\','/')})
     collision=f'{source.stem}-collision.obj'
     (output/collision).write_text('\n'.join(collision_lines))
     manifest[source.stem]={'parts':parts,'collision':collision,'height':float((hi-lo)[2]*scale)}

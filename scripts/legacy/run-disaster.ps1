@@ -1,11 +1,12 @@
 param([switch]$Headless, [switch]$Overview, [switch]$FailureDemo, [switch]$Scripted, [int]$Duration = 3600, [ValidateSet('openai','ollama','jev')][string]$AI, [string]$Model, [int]$AIMaxRequests = 0)
 $ErrorActionPreference = 'Stop'
-$env:PATH = "$PSScriptRoot\.conda-drones;$PSScriptRoot\.conda-drones\Library\bin;$PSScriptRoot\.conda-drones\Scripts;$env:PATH"
-$env:PYTHONPATH = Join-Path $PSScriptRoot 'gym-pybullet-drones'
-$swarmPython = Join-Path $PSScriptRoot '.venv-swarm\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $swarmPython)) { $swarmPython = Join-Path $PSScriptRoot '.conda-drones\python.exe' }
-if (-not (Test-Path -LiteralPath $swarmPython)) { throw 'Run powershell -ExecutionPolicy Bypass -File .\setup.ps1 first.' }
-$taskArguments = @('-u', (Join-Path $PSScriptRoot 'disaster_demo.py'), '--duration', $Duration)
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)  # repository root (scripts/legacy/..)
+$env:PATH = "$root\.conda-drones;$root\.conda-drones\Library\bin;$root\.conda-drones\Scripts;$env:PATH"
+$env:PYTHONPATH = Join-Path $root 'gym-pybullet-drones'
+$swarmPython = Join-Path $root '.venv-swarm\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $swarmPython)) { $swarmPython = Join-Path $root '.conda-drones\python.exe' }
+if (-not (Test-Path -LiteralPath $swarmPython)) { throw 'Run powershell -ExecutionPolicy Bypass -File .\scripts\legacy\setup.ps1 first.' }
+$taskArguments = @('-u', (Join-Path $root 'legacy\pybullet\disaster_demo.py'), '--duration', $Duration)
 if ($Headless) { $taskArguments += '--headless' }
 if ($Overview) { $taskArguments += '--overview' }
 if ($FailureDemo) { $taskArguments += '--failure-demo' }

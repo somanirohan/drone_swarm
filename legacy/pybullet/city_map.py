@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 import pybullet as p
 
-ROOT=Path(__file__).parent
-READY=ROOT/'assets'/'city-ready'
+# Repository root (this file lives in legacy/pybullet/).
+ROOT=Path(__file__).resolve().parents[2]
+READY=ROOT/'assets'/'legacy'/'city-ready'
 
 PLACEMENTS=[('building-01',[-10,6.75,0]),('building-02',[-4.75,7.25,0]),
             ('building-03',[3.75,7,0]),('building-04',[-8,-5,0]),
