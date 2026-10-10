@@ -38,7 +38,7 @@ def _http(connection, request):
     if path == '/ws':
         return None
     if path in ('/', '/index.html'):
-        path = '/web/index.html'
+        path = '/web/legacy/index.html'
     parts = path.lstrip('/').split('/', 1)
     base = SERVED.get(parts[0])
     if base is None or len(parts) < 2:

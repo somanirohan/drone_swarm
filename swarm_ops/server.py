@@ -31,6 +31,10 @@ PROTOCOL = 'disruptionops.swarm.v2'
 COMMANDS = {'random_scenario', 'scenario', 'pause', 'resume', 'speed', 'reset',
             'fault', 'release_resource', 'ack_handoff', 'fleet', 'detect', 'random_incident'}
 INTEGRATION_COMMANDS = {'external_resource_update', 'agency_request'}
+OLD_WEB_PATHS = {'/web/operations.html': '/web/ops/operations.html',
+                 '/web/operations.css': '/web/ops/operations.css',
+                 '/web/operations.js': '/web/ops/operations.js',
+                 '/web/index.html': '/web/legacy/index.html'}
 
 
 class EventJournal:
@@ -119,9 +123,11 @@ class OperationsServer:
             events = self.journal.replay(after, limit)
             return self._json(HTTPStatus.OK, {'events': events, 'next_cursor': events[-1]['cursor'] if events else after})
         if path in ('/', '/index.html', '/operations'):
-            path = '/web/operations.html'
+            path = '/web/ops/operations.html'
         if path == '/legacy':
-            path = '/web/index.html'
+            path = '/web/legacy/index.html'
+        # Old URLs from before the web/ops + web/legacy split; already-shared links keep working.
+        path = OLD_WEB_PATHS.get(path, path)
         prefix, _, tail = path.lstrip('/').partition('/')
         if prefix not in ('web', 'assets'):
             return self._json(HTTPStatus.NOT_FOUND, {'error': 'not found'})

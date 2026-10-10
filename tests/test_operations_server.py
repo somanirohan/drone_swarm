@@ -188,6 +188,22 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_http_path_traversal_rejected(self):
         status,_,_=await self.http('/web/%2e%2e/.env')
         self.assertEqual(status,404)
+        for path in ('/web/ops/%2e%2e/%2e%2e/.env','/web/legacy/..%2f..%2f.env','/assets/%2e%2e/.env'):
+            status,_,_=await self.http(path)
+            self.assertEqual(status,404,path)
+
+    async def test_viewer_urls_new_and_old(self):
+        # New layout (web/ops, web/legacy) plus the old /web/operations.* links friends already have.
+        for path,marker in (('/',b'operations.js'),('/web/ops/operations.html',b'operations.js'),
+                            ('/web/operations.html',b'operations.js'),('/legacy',b'importmap'),
+                            ('/web/legacy/index.html',b'importmap'),('/web/index.html',b'importmap')):
+            status,_,body=await self.http(path)
+            self.assertEqual(status,200,path)
+            self.assertIn(marker,body,path)
+        for path in ('/web/ops/operations.js','/web/operations.js','/web/ops/operations.css','/web/operations.css',
+                     '/web/vendor/three.module.js'):
+            status,_,_=await self.http(path)
+            self.assertEqual(status,200,path)
 
     async def test_cross_origin_ws_rejected(self):
         with self.assertRaises(InvalidStatus) as rejected:
