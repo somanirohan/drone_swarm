@@ -89,7 +89,7 @@ async def run(args):
         def show_ack(msg):
             if not msg.get("ok"):
                 summary["errors"] += 1
-                print(f"  ✗ rejected: {msg.get('error')}")
+                print(f"  x rejected: {msg.get('error')}")
                 return
             result = msg.get("result", msg)
             incident = result.get("incident_id")
@@ -100,7 +100,7 @@ async def run(args):
                 summary["accepted"] += 1
             elif accepted is False:
                 summary["declined"] += 1
-            print(f"  ↳ swarm: {'ACCEPTED' if accepted else 'DECLINED' if accepted is False else 'ok'}"
+            print(f"  -> swarm: {'ACCEPTED' if accepted else 'DECLINED' if accepted is False else 'ok'}"
                   f" incident={incident} eta={result.get('eta_s')} drones={result.get('assigned_drones')}"
                   f" reason={result.get('reason')}")
             for step in result.get("plan") or []:
@@ -119,11 +119,11 @@ async def run(args):
                 n += 1
                 summary["sent"] += 1
                 if args.as_operator:
-                    print(f"\n[DisruptionOps → swarm] #{n} random_incident ({report['category']})")
+                    print(f"\n[DisruptionOps -> swarm] #{n} random_incident ({report['category']})")
                     await ws.send(envelope("random_incident", {}, state["run_id"]))
                 else:
                     position = pick_point(state, rng)
-                    print(f"\n[DisruptionOps → swarm] #{n} agency_request: \"{report['text']}\" at {position[:2]}")
+                    print(f"\n[DisruptionOps -> swarm] #{n} agency_request: \"{report['text']}\" at {position[:2]}")
                     await ws.send(envelope("agency_request", request_payload(report, position, n), state["run_id"]))
                 next_send = time.monotonic() + args.interval
             state = await next_snapshot()
