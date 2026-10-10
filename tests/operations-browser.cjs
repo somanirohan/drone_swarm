@@ -24,9 +24,21 @@ const wait=async(predicate,timeout=10000)=>{const end=Date.now()+timeout;while(D
  assert.equal(await page.locator('#operator-role').textContent(),'Operator');
  assert(current.drones.length>=20);assert.equal(await page.locator('#fleet-list button').count(),current.drones.length);
  // Tabs: every sidebar tab must reveal exactly its own panel; arrow keys move between tabs.
- for(const tab of ['incidents','fleet','response','mission']){await page.locator(`#tab-${tab}`).click();assert.equal(await page.locator(`#tab-${tab}`).getAttribute('aria-selected'),'true');assert.equal(await page.locator('.tab-panel:visible').count(),1);assert(await page.locator(`#panel-${tab}`).isVisible(),`${tab} panel must open`)}
+ for(const tab of ['incidents','fleet','response','command','mission']){await page.locator(`#tab-${tab}`).click();assert.equal(await page.locator(`#tab-${tab}`).getAttribute('aria-selected'),'true');assert.equal(await page.locator('.tab-panel:visible').count(),1);assert(await page.locator(`#panel-${tab}`).isVisible(),`${tab} panel must open`)}
  await page.locator('#tab-mission').focus();await page.keyboard.press('ArrowRight');assert.equal(await page.locator('#tab-incidents').getAttribute('aria-selected'),'true');await page.locator('#tab-mission').click();
  await page.locator('#tab-fleet').click();assert.equal(await page.locator('#fleet-list button').count(),current.drones.length);await page.locator('#tab-mission').click();
+ // Command tab: chat-like timeline of command-center <-> agent messages (skipped gracefully when the server does not publish them).
+ await page.locator('#tab-command').click();assert(await page.locator('#msg-filter').isVisible(),'command tab has an incident filter');
+ if(Array.isArray(current.messages)&&current.messages.length){await wait(async()=>(await page.locator('#msg-list .msg').count())>0,8000);const first=page.locator('#msg-list .msg').first();assert((await first.textContent()).length>3);
+  const inc=current.messages.find(m=>m.incident_id&&current.incidents.some(i=>i.id===m.incident_id))?.incident_id;
+  if(inc){await page.locator('#msg-filter').selectOption(inc);await wait(async()=>(await page.locator('#msg-list .msg').evaluateAll((els,id)=>els.every(e=>e.dataset.msgIncident===id),inc)),5000);await page.locator('#msg-list .msg').first().click();await page.locator('#selection').waitFor({state:'visible'});await page.locator('#close-selection').click();await page.locator('#msg-filter').selectOption('')}}
+ else console.log('note: state.messages absent; command timeline not exercised');
+ await page.locator('#tab-mission').click();
+ // Scenario selector is grouped by world.
+ assert((await page.locator('#scenario-select optgroup').count())>=1,'scenario dropdown grouped by world');
+ // Civilian traffic (when published) must be instanced and animated, never labelled.
+ if(Array.isArray(current.traffic)&&current.traffic.length){const t0=await page.evaluate(()=>__ops.trafficCount);assert(t0>0,'traffic must be tracked');assert.equal(await page.evaluate(()=>[...__ops.traffic.map.values()].length),await page.evaluate(()=>__ops.trafficCount))}
+ else console.log('note: state.traffic absent; traffic not exercised');
  // Fleet-size selector sends the fleet command and reflects the snapshot.
  const fleetOptions=await page.locator('#fleet-select option').evaluateAll(o=>o.map(x=>x.value));assert.deepEqual(fleetOptions,['5','10','20','25','40','50']);
  assert.equal(await page.locator('#view-only-note').isHidden(),true,'operator sessions do not show the view-only note');
@@ -43,7 +55,7 @@ const wait=async(predicate,timeout=10000)=>{const end=Date.now()+timeout;while(D
  await page.locator('#scenario-select').selectOption('dock_fire');await wait(()=>current.scenario.id==='dock_fire',15000);
  if(current.docks){assert(current.docks.length>=1);await wait(async()=>(await page.evaluate(()=>window.__ops.dockObjects.size))===current.docks.length,5000);assert.match(await page.locator('#dock-summary').textContent(),/docked/);}
  assert((await page.locator('#scenario-description').textContent()).length>20,'scenario description must update');
- await page.locator('#tab-fleet').click();await page.locator('[data-select="drone"]').first().click();await page.locator('#selection').filter({hasText:'D01'}).waitFor();await page.locator('#camera-focus').click();await wait(async()=>!(await page.evaluate(()=>window.__ops.flying)),8000);await page.evaluate(()=>document.getElementById('close-selection')?.click());await page.locator('#tab-mission').click();
+ await page.locator('#tab-fleet').click();await page.locator('[data-select="drone"]').first().click();await page.locator('#selection').filter({hasText:'D01'}).waitFor();if(current.drones.find(d=>d.id==='D01')?.last_decision)await page.locator('#selection').filter({hasText:'Agent decision'}).waitFor({timeout:5000});await page.locator('#camera-focus').click();await wait(async()=>!(await page.evaluate(()=>window.__ops.flying)),8000);await page.evaluate(()=>document.getElementById('close-selection')?.click());await page.locator('#tab-mission').click();
  if((current.signals||[]).length)await wait(async()=>(await page.evaluate(()=>window.__ops.signalObjects.size))>0,5000);
  // Rescue-issue controls: Esc cancels placement mode; clicking the map opens the popover; placing raises a new incident.
  await page.locator('#camera-overview').click();await wait(async()=>!(await page.evaluate(()=>window.__ops.flying)),8000);
@@ -89,7 +101,7 @@ const wait=async(predicate,timeout=10000)=>{const end=Date.now()+timeout;while(D
  assert.equal(horizontalOverflow,false,'Mobile layout should not overflow horizontally');
  await page.setViewportSize({width:1600,height:1000});await page.locator('#camera-overview').click();
  assert.deepEqual(errors,[]);assert(frames>20);
- await fs.writeFile(path.join(process.env.OPS_TEST_OUT||path.join(root,'docs/implementation'),'browser-results.json'),JSON.stringify({passed:true,fleet:current.drones.length,frames,checks:['all scenarios','concurrent ground dispatch','random seed/run','pause/resume','coverage/routes','selection/cameras','tabs/arrow keys','fleet selector','double-click zoom','dock scenario/focus','rescue issue controls','crash reassignment','offline controls/reconnect','desktop/mobile layout'],javascript_errors:errors},null,2));
+ await fs.writeFile(path.join(process.env.OPS_TEST_OUT||path.join(root,'docs/implementation'),'browser-results.json'),JSON.stringify({passed:true,fleet:current.drones.length,frames,checks:['all scenarios','concurrent ground dispatch','random seed/run','pause/resume','coverage/routes','selection/cameras','tabs/arrow keys','fleet selector','double-click zoom','dock scenario/focus','command tab/messages (if published)','traffic (if published)','grouped scenario selector','rescue issue controls','crash reassignment','offline controls/reconnect','desktop/mobile layout'],javascript_errors:errors},null,2));
  console.log(JSON.stringify({passed:true,fleet:current.drones.length,frames,javascript_errors:errors}));
  await browser.close();
 })().catch(async error=>{console.error(error);if(browser)await browser.close();process.exitCode=1;});
