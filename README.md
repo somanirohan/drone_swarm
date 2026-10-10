@@ -45,7 +45,7 @@ Or start Ollama with an installed instruction model:
 .\run-disaster.ps1 -AI ollama -Model YOUR_INSTALLED_MODEL
 ```
 
-API usage may incur charges. The default AI run caps requests at 120; `-AIMaxRequests` changes the cap. Read [AI setup and behavior](AI-SWARM-GUIDE.md).
+API usage may incur charges. The default AI run caps requests at 120; `-AIMaxRequests` changes the cap. Read [AI setup and behavior](legacy/pybullet/docs/AI-SWARM-GUIDE.md).
 
 ## Verification
 
@@ -60,8 +60,8 @@ The rule-mode normal and unavailability runs previously completed all three deli
 
 Flight control runs at 48 Hz; physics runs at 240 Hz. Sensing uses idealized simulator range/line-of-sight checks, battery is an illustrative estimate, and all drone agents execute in one process. This is a simulation, without camera recognition, SLAM or a learned flight policy. The map is assembled from prebuilt assets rather than a complete third-party disaster simulator.
 
-- [Agent behavior](AGENTIC-GUIDE.md)
-- [Disaster map](DISASTER-GUIDE.md)
+- [Agent behavior](legacy/pybullet/docs/AGENTIC-GUIDE.md)
+- [Disaster map](legacy/pybullet/docs/DISASTER-GUIDE.md)
 - [Map source and CC0 attribution](assets/CITY-SOURCE.md)
 - Vendored drone code: [gym-pybullet-drones](https://github.com/learnsyslab/gym-pybullet-drones), retaining its [MIT license](gym-pybullet-drones/LICENSE). Local upstream files include controller modifications.
 

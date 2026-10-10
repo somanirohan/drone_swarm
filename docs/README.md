@@ -43,12 +43,12 @@ Reference DisruptionOps version for all integration documents: commit `bd21179` 
 | [research/.../repository-integration.md](research/100-drone-disaster-response/repository-integration.md) | Earlier repository findings; DisruptionOps parts predate bd21179. |
 | `research/.../sources.md`, `*.dot`, `*.svg`, `drawio/` | Sources and diagrams. |
 
-## Root-level guides (legacy PyBullet exercise)
+## Legacy PyBullet exercise guides (`../legacy/pybullet/docs/`)
 
 | Document | One line |
 |---|---|
 | [../README.md](../README.md) | Project overview and run commands. |
-| [../AGENTIC-GUIDE.md](../AGENTIC-GUIDE.md), [../AI-SWARM-GUIDE.md](../AI-SWARM-GUIDE.md) | Rule agents and optional AI planner for the 12-drone exercise. |
-| [../DISASTER-GUIDE.md](../DISASTER-GUIDE.md), [../DRONES-GUIDE.md](../DRONES-GUIDE.md), [../WEB-GUIDE.md](../WEB-GUIDE.md), [../FRIEND-GUIDE.md](../FRIEND-GUIDE.md) | Legacy map, setup, web hosting and the old feed spec. |
-| [../PRODUCTION-ARCHITECTURE.md](../PRODUCTION-ARCHITECTURE.md) | Early production architecture brief. |
-| [../resume.md](../resume.md) | The user's earlier conversation; source of the stated expectations. |
+| [AGENTIC-GUIDE.md](../legacy/pybullet/docs/AGENTIC-GUIDE.md), [AI-SWARM-GUIDE.md](../legacy/pybullet/docs/AI-SWARM-GUIDE.md) | Rule agents and optional AI planner for the 12-drone exercise. |
+| [DISASTER-GUIDE.md](../legacy/pybullet/docs/DISASTER-GUIDE.md), [DRONES-GUIDE.md](../legacy/pybullet/docs/DRONES-GUIDE.md), [WEB-GUIDE.md](../legacy/pybullet/docs/WEB-GUIDE.md), [FRIEND-GUIDE.md](../legacy/pybullet/docs/FRIEND-GUIDE.md) | Legacy map, setup, web hosting and the old feed spec. |
+| [PRODUCTION-ARCHITECTURE.md](../legacy/pybullet/docs/PRODUCTION-ARCHITECTURE.md) | Early production architecture brief. |
+| `history/resume.md` | The user's earlier conversation (local only, not committed); source of the stated expectations. |
