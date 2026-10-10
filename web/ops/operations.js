@@ -279,48 +279,62 @@ function updateCoverage(){
 
 /* ====================== routes ====================== */
 const routeMat=new THREE.LineBasicMaterial({color:ROUTE_COLOR,transparent:true,opacity:.55});
-function routeLineFor(key){let r=routeLines.get(key);if(!r){const geo=new THREE.BufferGeometry(),arr=new Float32Array(MAXR*3);geo.setAttribute('position',new THREE.BufferAttribute(arr,3));geo.setDrawRange(0,0);const l=new THREE.Line(geo,routeMat);l.frustumCulled=false;routesGroup.add(l);r={line:l,geo,arr,n:0,owner:null,sig:''};routeLines.set(key,r)}return r}
-function setRoute(key,owner,route,active){
+const lmCache={};const lineMat=(color,dash,op)=>{const k=color+dash+op;if(!lmCache[k]){lmCache[k]=dash?new THREE.LineDashedMaterial({color,dashSize:9,gapSize:7,transparent:true,opacity:op}):new THREE.LineBasicMaterial({color,transparent:true,opacity:op});sharedMat.add(lmCache[k])}return lmCache[k]};
+function routeLineFor(key){let r=routeLines.get(key);if(!r){const geo=new THREE.BufferGeometry(),arr=new Float32Array(MAXR*3);geo.setAttribute('position',new THREE.BufferAttribute(arr,3));geo.setDrawRange(0,0);const l=new THREE.Line(geo,routeMat);l.frustumCulled=false;routesGroup.add(l);r={line:l,geo,arr,cap:MAXR,n:0,owner:null,sig:'',anchored:false,dashed:false};routeLines.set(key,r)}return r}
+function setLine(key,owner,pts,mat,dashed,anchored){
  const r=routeLineFor(key);r.owner=owner;
- if(!active||!route?.length||!owner){r.n=0;r.geo.setDrawRange(0,0);r.sig='';return}
- const pts=route.slice(0,MAXR-1),sig=JSON.stringify(pts);
- if(sig!==r.sig){r.sig=sig;pts.forEach((p,i)=>{const v=vec(p);r.arr[(i+1)*3]=v.x;r.arr[(i+1)*3+1]=v.y;r.arr[(i+1)*3+2]=v.z});r.n=pts.length+1}
- r.geo.setDrawRange(0,r.n);
+ if(!pts||!pts.length||(anchored&&!owner)){r.n=0;r.geo.setDrawRange(0,0);r.sig='';r.line.visible=false;return}
+ const off=anchored?1:0,need=pts.length+off;
+ if(need>r.cap){r.cap=need+64;r.arr=new Float32Array(r.cap*3);r.geo.setAttribute('position',new THREE.BufferAttribute(r.arr,3));r.sig=''}
+ const sig=mat.uuid+'|'+pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)+','+p.z.toFixed(1)).join(';');
+ if(sig!==r.sig){r.sig=sig;pts.forEach((p,i)=>{r.arr[(i+off)*3]=p.x;r.arr[(i+off)*3+1]=p.y;r.arr[(i+off)*3+2]=p.z});r.n=need;r.geo.attributes.position.needsUpdate=true}
+ r.anchored=anchored;r.dashed=dashed;r.line.material=mat;r.line.visible=true;r.geo.setDrawRange(0,r.n);if(dashed&&!anchored)r.line.computeLineDistances();
 }
+// drone paths are drawn at flight altitude; only the vertical drop line at the hover point ever reaches the ground
+function airPts(d,arr){const alt=Math.max(20,Number(d.position?.[2])||0);return (arr||[]).filter(p=>Array.isArray(p)).map(p=>{const v=vec(p);v.y=Math.max(v.y,groundHeight(p[0],p[1])+alt);return v})}
+const droneKind=d=>d.route_kind||(d.task_id?'mission':'sweep');
 function updateRoutes(){
  const keep=new Set();
- for(const d of state.drones||[]){keep.add('d:'+d.id);setRoute('d:'+d.id,droneObjects.get(d.id),d.route,d.activity!=='docked'&&d.state!=='crashed')}
- for(const r of state.resources||[]){keep.add('r:'+r.id);const inc=r.incident_id&&(state.incidents||[]).find(i=>i.id===r.incident_id),moving=!['available','unavailable','on_scene','awaiting_handoff','evacuating','holding','busy'].includes(r.state);setRoute('r:'+r.id,resourceObjects.get(r.id),r.route?.length?r.route:(inc&&moving&&inc.position?[inc.position]:[]),true)}
+ for(const d of state.drones||[]){
+  const kind=droneKind(d),airborne=d.activity!=='docked'&&d.state!=='crashed',o=droneObjects.get(d.id),sel=selected?.kind==='drone'&&selected.id===d.id;
+  keep.add('d:'+d.id);keep.add('s:'+d.id);
+  if(airborne&&kind==='mission')setLine('d:'+d.id,o,airPts(d,d.route),lineMat('#1d1d1f',false,.75),false,true);
+  else if(airborne&&kind==='return')setLine('d:'+d.id,o,airPts(d,d.route),lineMat('#8e8e93',true,.85),true,true);
+  else setLine('d:'+d.id,null,null);
+  const sw=Array.isArray(d.sweep)&&d.sweep.length?d.sweep:(kind==='sweep'&&airborne?d.route:null);
+  setLine('s:'+d.id,null,airborne&&sw&&(sel||showSearch)?airPts(d,sw):null,lineMat('#6e6e73',false,sel?.55:.3),false,false);
+ }
+ for(const r of state.resources||[]){keep.add('r:'+r.id);const o=resourceObjects.get(r.id),pts=(r.route||[]).filter(p=>Array.isArray(p)).map(p=>{const v=vec(p);v.y+=.8;return v});setLine('r:'+r.id,o,pts,lineMat(RESOURCE_COLOR[resourceKind(r)]||'#0066cc',false,.9),false,true)}
  for(const [k,r] of routeLines)if(!keep.has(k)){routesGroup.remove(r.line);r.geo.dispose();routeLines.delete(k)}
  routesGroup.visible=showRoutes;updateCoverage();updateSelectedRoute();
 }
 function stepRouteAnchors(){
- for(const r of routeLines.values()){if(!r.n||!r.owner)continue;r.arr[0]=r.owner.position.x;r.arr[1]=r.owner.position.y;r.arr[2]=r.owner.position.z;r.geo.attributes.position.needsUpdate=true}
+ for(const r of routeLines.values()){if(!r.n||!r.owner||!r.anchored)continue;r.arr[0]=r.owner.position.x;r.arr[1]=r.owner.position.y;r.arr[2]=r.owner.position.z;r.geo.attributes.position.needsUpdate=true;if(r.dashed)r.line.computeLineDistances()}
 }
 let leadIn=null,trailLine=null;
 function updateSelectedRoute(){
  updateZone();
  const d=selected?.kind==='drone'?(state.drones||[]).find(x=>x.id===selected.id):null;
- const sig=d&&showRoutes&&d.route?.length&&d.activity!=='docked'?d.id+JSON.stringify(d.route):'';
+ const kind=d?droneKind(d):'',sig=d&&showRoutes&&d.route?.length&&d.activity!=='docked'&&kind!=='sweep'?d.id+kind+JSON.stringify(d.route)+(d.position?.[2]|0):'';
  if(sig===selSignature)return;selSignature=sig;disposeGroup(selGroup);leadIn=null;if(!sig)return;
- const black=new THREE.MeshBasicMaterial({color:ROUTE_COLOR}),pts=d.route.map(vec);
+ const black=new THREE.MeshBasicMaterial({color:kind==='return'?'#8e8e93':ROUTE_COLOR}),pts=airPts(d,d.route);
 const tubeR=region.on?Math.max(.7,Math.min(6,camDist/900)):.7;
  for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];if(a.distanceToSquared(b)<1e-4)continue;selGroup.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(a,b),1,tubeR,6,false),black))}
  leadIn=new THREE.Mesh(new THREE.CylinderGeometry(.7,.7,1,6),black);leadIn.userData.to=pts[0].clone();selGroup.add(leadIn);
  pts.forEach((p,index)=>{const node=new THREE.Mesh(new THREE.SphereGeometry(2.4,12,8),black);node.position.copy(p);selGroup.add(node);const tag=label(String(index+1),capabilityColor(d.payload),5);tag.position.copy(p).add(new THREE.Vector3(0,9,0));selGroup.add(tag)});
- // stand-off hover point: the route's last waypoint, with a dashed link to the actual target when they differ
- const hover=Array.isArray(d.standoff)?vec(d.standoff):Array.isArray(d.hover_point)?vec(d.hover_point):pts[pts.length-1],tgt=Array.isArray(d.target)?vec(d.target):null;
+ // stand-off hover point (mission only): ring in the air plus the single vertical drop line to the ground
+ if(kind==='mission'&&pts.length){const hover=Array.isArray(d.standoff)?airPts(d,[d.standoff])[0]:pts[pts.length-1];
  const hr=new THREE.Mesh(new THREE.RingGeometry(6,8,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#ffffff',side:THREE.DoubleSide,depthTest:false,transparent:true,opacity:.95}));hr.position.copy(hover);hr.renderOrder=6;selGroup.add(hr);
  const hs=new THREE.Mesh(new THREE.RingGeometry(3.2,4.6,24).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#000000',side:THREE.DoubleSide,depthTest:false}));hs.position.copy(hover);hs.renderOrder=7;selGroup.add(hs);
  const htag=label('Hover point','#000000',5);htag.position.copy(hover).add(new THREE.Vector3(0,24,0));selGroup.add(htag);
- if(tgt&&tgt.distanceTo(hover)>3){const dl=new THREE.Line(new THREE.BufferGeometry().setFromPoints([hover.clone(),tgt.clone()]),new THREE.LineDashedMaterial({color:'#000000',dashSize:5,gapSize:4,depthTest:false}));dl.computeLineDistances();dl.renderOrder=6;selGroup.add(dl)}
+ const g0=groundHeight(hover.x,-hover.z);selGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([hover.clone(),new THREE.Vector3(hover.x,g0+1,hover.z)]),new THREE.LineBasicMaterial({color:'#000000'})))}
 }
 function stepSelectedFX(){
  const o=selected?.kind==='drone'?droneObjects.get(selected.id):null;
  if(leadIn&&o){const a=o.position,b=leadIn.userData.to,dir=b.clone().sub(a),len=dir.length();leadIn.visible=len>.5;if(len>.5){leadIn.position.copy(a).addScaledVector(dir,.5);leadIn.scale.set(1,len,1);leadIn.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize())}}
  if(!o||!showRoutes){if(trailLine)trailLine.visible=false;return}
  if(!trailLine){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(42*3),3));geo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(42*3),3));trailLine=new THREE.Line(geo,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.9,depthTest:false}));trailLine.frustumCulled=false;trailLine.renderOrder=4;trailGroup.add(trailLine)}
- const tr=[...(o.userData.trail||[]),[o.position.x,o.position.y,o.position.z]],pa=trailLine.geometry.attributes.position,ca=trailLine.geometry.attributes.color;
+ const tr=[...(o.userData.trail||[]),[o.position.x,o.position.y,o.position.z]].filter(q=>q[1]>groundHeight(q[0],-q[2])+12),pa=trailLine.geometry.attributes.position,ca=trailLine.geometry.attributes.color;
  tr.forEach((p,i)=>{pa.setXYZ(i,p[0],p[1],p[2]);const f=i/Math.max(1,tr.length-1),shade=.85*(1-f)+.1*f;ca.setXYZ(i,shade,shade+.01,shade+.02)});pa.needsUpdate=ca.needsUpdate=true;trailLine.geometry.setDrawRange(0,tr.length);trailLine.visible=tr.length>1;
 }
 
@@ -358,6 +372,15 @@ function frameEntity(kind,id){const o=kindMap()[kind]?.get(id);if(!o)return;flyT
 function select(kind,id){selected={kind,id};cameraMode='focus';frameEntity(kind,id);selSignature='';renderUI();updateSelectedRoute()}
 function focusSelected(){if(selected)frameEntity(selected.kind,selected.id);else toast('Select a drone, incident, responder or dock first.')}
 
+const isOrch=i=>!!i&&(i.control_mode==='orchestrated'||/disruptionops/i.test(String(i.assigned_by||'')));
+const orchIncidents=new Set(),orchActors=new Set();
+function syncOrch(){orchIncidents.clear();orchActors.clear();
+ for(const i of state.incidents||[])if(isOrch(i)&&!['resolved','completed'].includes(i.status)){orchIncidents.add(i.id);for(const id of [i.drone_id,...(i.assigned_drones||[]),...(i.assigned_units||[])])if(id)orchActors.add(id);for(const r of state.resources||[])if(r.incident_id===i.id)orchActors.add(r.id)}
+ for(const map of [droneObjects,resourceObjects,incidentObjects])for(const [id,o] of map){const on=orchActors.has(id)||orchIncidents.has(id);let ring=o.userData.orch;
+  if(on&&!ring){const radius=o.userData.kind==='incident'?20:o.userData.kind==='drone'?9:8;ring=new THREE.Mesh(new THREE.RingGeometry(radius,radius+1.4,40).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#0066cc',transparent:true,opacity:.95,depthTest:false,side:THREE.DoubleSide}));ring.position.y=o.userData.kind==='drone'?-4:.6;ring.renderOrder=8;o.add(ring);o.userData.orch=ring}
+  if(ring)ring.visible=on;
+  if(o.userData.kind==='incident'){if(on&&!o.userData.orchTag){const tag=label('Assigned by DisruptionOps','#0066cc',6);tag.position.y=104;tag.userData.s0=tag.scale.clone();o.add(tag);o.userData.orchTag=tag}if(o.userData.orchTag)o.userData.orchTag.visible=on}}
+}
 function renderSelection(){
  const el=$('selection');if(!selected){el.classList.add('hidden');return}
  const item=itemsOf(selected.kind)?.find(x=>x.id===selected.id);if(!item){el.classList.add('hidden');return}
@@ -366,6 +389,7 @@ function renderSelection(){
  let html='';const head=`<div class="detail-heading"><h3>${escapeHTML(item.title||item.name||item.id)}</h3><span class="detail-actions"><button data-focus title="Fly the camera to this item">Focus</button><button id="close-selection" aria-label="Close details">×</button></span></div>`;
  if(selected.kind==='incident'){
   const assigned=(state.resources||[]).filter(r=>r.incident_id===item.id),unmet=(item.needs||[]).filter(n=>!(item.supplied||[]).includes(n)),remaining=(item.required_kinds||[]).filter(n=>!(item.completed_kinds||[]).includes(n)),observed=item.last_observed??item.briefing?.observed_at;
+  if(isOrch(item))html+='<p class="orch-badge">Assigned by DisruptionOps</p>';
   html+=`<p class="detail-status">${escapeHTML(nice(item.category))} / ${escapeHTML(nice(item.status))} / Priority ${escapeHTML(item.severity)}</p>`;
   html+=row('People',(()=>{const c=peopleCounts(item.id);return c.total?`${c.waiting} waiting · ${c.progress} being helped · ${c.safe} safe`:`${item.people||0}`})())+row('Evacuated',`${item.evacuated_people||0} / ${item.people||0} people`)+row('Still needed',list(unmet))+row('Supplied',list(item.supplied))+row('Required response',list(item.required_kinds))+row('Completed response',list(item.completed_kinds))+row('Outstanding response',list(remaining))+row('Assigned drone',item.drone_id||'Awaiting assignment')+row('First on scene',item.first_on_scene?nice(item.first_on_scene):'Nobody yet')+row('Resource requests',(item.resource_requests||[]).map(r=>`${r.qty}x ${nice(r.needed_kind)} (${nice(r.status)}${r.fulfilled_by?.length?': '+r.fulfilled_by.join(', '):''})`).join('; ')||'None');
   html+='<div class="detail-divider"></div>';
@@ -411,7 +435,7 @@ function renderUI(){
  $('issue-summary').textContent=issueLine;$('issues-line').textContent=issueLine;$('header-issues').textContent=`${openN} open / ${incidents.length}`;$('header-issues').title=issueLine;$('metric-incidents').textContent=openN;
  const operational=drones.filter(d=>d.active!==false&&!['crashed','offline','failed'].includes(d.state)).length;
  $('incident-count').textContent=incidents.length;$('header-active').textContent=operational;$('header-speed').textContent=`${state.speed||1}x`;$('fleet-count').textContent=`${drones.length} drones`;$('fleet-active').textContent=operational;$('fleet-energy').textContent=`${drones.length?Math.round(drones.reduce((n,d)=>n+(d.battery||0),0)/drones.length*100):0}% avg. charge`;$('resource-count').textContent=resources.length;
- patchList($('incident-list'),[...incidents].sort((a,b)=>(parseInt(String(b.id).replace(/\D/g,''))||0)-(parseInt(String(a.id).replace(/\D/g,''))||0)),i=>`<button class="incident-card ${selected?.id===i.id?'selected':''} ${['resolved','completed'].includes(i.status)?'resolved':''}" data-select="incident" data-id="${escapeHTML(i.id)}"><div class="card-top"><span class="badge">${['resolved','completed'].includes(i.status)?'✓':escapeHTML(nice(i.severity))}</span><small>${escapeHTML(i.id)}</small></div><strong>${escapeHTML(i.title||nice(i.category))}</strong><div class="card-bottom"><span>${(()=>{const c=peopleCounts(i.id);return c.total?`${i.people||c.total} people · ${c.waiting} waiting${c.safe?` · ${c.safe} safe`:''}`:`${i.people||0} people`})()}</span><span>${escapeHTML(nice(i.status))}</span></div></button>`,'<p class="muted">No incidents yet.</p>');
+ patchList($('incident-list'),[...incidents].sort((a,b)=>(parseInt(String(b.id).replace(/\D/g,''))||0)-(parseInt(String(a.id).replace(/\D/g,''))||0)),i=>`<button class="incident-card ${selected?.id===i.id?'selected':''} ${['resolved','completed'].includes(i.status)?'resolved':''}" data-select="incident" data-id="${escapeHTML(i.id)}"><div class="card-top"><span class="badge">${['resolved','completed'].includes(i.status)?'✓':escapeHTML(nice(i.severity))}</span>${isOrch(i)?'<span class="badge orch">DisruptionOps</span>':''}<small>${escapeHTML(i.id)}</small></div><strong>${escapeHTML(i.title||nice(i.category))}</strong><div class="card-bottom"><span>${(()=>{const c=peopleCounts(i.id);return c.total?`${i.people||c.total} people · ${c.waiting} waiting${c.safe?` · ${c.safe} safe`:''}`:`${i.people||0} people`})()}</span><span>${escapeHTML(nice(i.status))}</span></div></button>`,'<p class="muted">No incidents yet.</p>');
  patchList($('fleet-list'),drones,d=>`<button class="drone-card ${selected?.id===d.id?'selected':''}" data-select="drone" data-id="${escapeHTML(d.id)}"><div class="drone-top"><span><i class="capability-dot" style="background:${capabilityColor(d.payload)}"></i>${escapeHTML(d.id)}</span><span>${Math.round((d.battery||0)*100)}%</span></div><div class="drone-state"><i class="activity-dot" style="background:${ACTIVITY_COLOR[d.activity]||FOOT_FALLBACK}"></i>${escapeHTML(nice(d.activity||d.state))}</div><div class="battery-bar"><i style="width:${Math.round(Math.max(0,Math.min(100,(d.battery||0)*100)))}%;${d.battery<.25?'background:#eea17d':''}"></i></div></button>`);
  patchList($('resource-list'),resources,r=>`<div class="resource-card"><span class="resource-icon ${r.kind==='fire_engine'?'fire':''}">${/boat/i.test(r.transport||r.kind)?'◒':'▰'}</span><div><button class="resource-name" data-select="resource" data-id="${escapeHTML(r.id)}">${escapeHTML(r.name||`${r.id} · ${nice(r.kind)}`)}${!r.name&&r.transport==='boat'?' boat':''}</button><small>${escapeHTML(r.agency?r.agency+' · ':'')}<b class="unit-state ${escapeHTML(r.state)}">${escapeHTML(unitState(r))}</b>${r.incident_id?` · ${escapeHTML(r.incident_id)}`:''}</small></div><button data-release="${escapeHTML(r.id)}" title="${r.incident_id?'Committed until response completes':r.state==='available'?'Already available':'Make responder available'}" ${token&&connected&&!r.incident_id&&r.state!=='available'?'':'disabled'}>Release</button></div>`);
  if(document.activeElement!==$('fault-drone')){const old=$('fault-drone').value;setHTML($('fault-drone'),drones.map(d=>`<option value="${escapeHTML(d.id)}">${escapeHTML(d.id)}</option>`).join(''));if(drones.some(d=>d.id===old))$('fault-drone').value=old}
@@ -435,7 +459,7 @@ function applySnapshot(packet){
  if(run!==next.run_id){run=next.run_id;sequence=-1;selected=null;clearRun();if(!next.world)disposeGroup(worldGroup)}
  sequence=packet.seq;state=next;const now=performance.now();if(lastPacket){const gap=now-lastPacket;if(gap<2000)packetDur=Math.max(60,Math.min(500,packetDur*.7+gap*.3))}lastPacket=now;
  if(next.world)buildWorld(next.world);updateDynamicWorld();
- syncDocks();syncActors(state.drones,droneObjects,createDrone,'drone');syncActors(state.resources,resourceObjects,createResource,'resource');syncActors(state.incidents,incidentObjects,createIncident,'incident');syncTraffic();ingestLog(state);
+ syncDocks();syncActors(state.drones,droneObjects,createDrone,'drone');syncActors(state.resources,resourceObjects,createResource,'resource');syncActors(state.incidents,incidentObjects,createIncident,'incident');syncTraffic();syncOrch();ingestLog(state);
  for(const o of incidentObjects.values()){if(o.userData.item?.handed_over)o.userData.ring.material.color.set('#89d8a8')}
  syncFootprints();syncSignals();syncPeople();syncSearch();checkNewIncident();updateRoutes();uiDirty=true;
  if(now-lastUI>250||!connected){renderUI();lastUI=now}
@@ -516,7 +540,7 @@ function updateZone(){
 let showLabels=true,showBuildings=true,showRoads=true;
 function layerMeshes(){const b=[],r=[];const roadSet=new Set([mats.curb,mats.road,mats.stripe]);for(const o of worldGroup.children){if(!o.isMesh)continue;const m=Array.isArray(o.material)?o.material[0]:o.material;if(roadSet.has(m))r.push(o);else if(m.map||m===mats.roof||m===mats.darkRoof)b.push(o)}return{b,r}}
 function applyLayers(){const {b,r}=layerMeshes();b.forEach(o=>o.visible=showBuildings);r.forEach(o=>o.visible=showRoads);if(showLabels)camera.layers.enable(2);else camera.layers.disable(2)}
-for(const [id,key] of [['toggle-labels','Labels'],['toggle-buildings','Buildings'],['toggle-roads','Roads'],['toggle-search','Search']]){const el=$(id);if(el)el.onclick=()=>{const on=!el.classList.contains('active');el.classList.toggle('active',on);el.setAttribute('aria-pressed',String(on));if(key==='Labels')showLabels=on;if(key==='Buildings')showBuildings=on;if(key==='Roads')showRoads=on;if(key==='Search'){showSearch=on;searchSignature='';if(state)syncSearch()}applyLayers()}}
+for(const [id,key] of [['toggle-labels','Labels'],['toggle-buildings','Buildings'],['toggle-roads','Roads'],['toggle-search','Search']]){const el=$(id);if(el)el.onclick=()=>{const on=!el.classList.contains('active');el.classList.toggle('active',on);el.setAttribute('aria-pressed',String(on));if(key==='Labels')showLabels=on;if(key==='Buildings')showBuildings=on;if(key==='Roads')showRoads=on;if(key==='Search'){showSearch=on;searchSignature='';if(state){syncSearch();updateRoutes()}}applyLayers()}}
 
 /* ====================== rescue issues ====================== */
 const ISSUE_DEFAULT={medical:{title:'Operator-raised medical emergency',needs:['first_aid']},flood:{title:'Operator-raised flood rescue',needs:['rescue']},fire:{title:'Operator-raised fire',needs:['assessment']},trapped:{title:'Operator-raised trapped residents',needs:['rescue']},blocked_route:{title:'Operator-raised blocked route',needs:['assessment']}};
@@ -902,7 +926,7 @@ function renderLog(force){
  if(sig===LOG.drawn&&!force)return;LOG.drawn=sig;
  let html='';
  if(!n)html=`<div class="logempty">${LOG.q||LOG.filter!=='all'?'Nothing matches this filter yet.':'Waiting for activity…'}</div>`;
- for(let i=a;i<b;i++){const r=LOG.filtered[i],g=LOG_GLYPH[r.kind]||['·','k-mute'],meta=[r.actor,r.meta&&r.meta!==r.actor?r.meta:'',nice(r.kind),r.incident].filter(Boolean).filter((v,j,arr)=>arr.indexOf(v)===j).join(' · ');
+ for(let i=a;i<b;i++){const r=LOG.filtered[i],g=LOG_GLYPH[r.kind]||['·','k-mute'],meta=[r.actor,r.meta&&r.meta!==r.actor?r.meta:'',nice(r.kind),r.incident,orchIncidents.has(r.incident)?'via DisruptionOps':''].filter(Boolean).filter((v,j,arr)=>arr.indexOf(v)===j).join(' · ');
   html+=`<div class="logrow" role="button" tabindex="0" data-i="${i}" style="top:${i*H}px"><time>${clock(r.t)}</time><i class="glyph ${g[1]}">${g[0]}</i><span class="logmain"><span class="logtext" title="${escapeHTML(r.text)}">${escapeHTML(r.text)}</span><span class="logmeta">${escapeHTML(r.why?`why: ${r.why}`:meta)}</span></span></div>`}
  $('oplog-rows').innerHTML=html;
  const jump=$('oplog-jump');jump.hidden=LOG.live;jump.textContent=LOG.unseen?`Jump to live · ${LOG.unseen} new`:'Jump to live';$('oplog-live').classList.toggle('paused',!LOG.live);$('oplog-live').title=LOG.live?'Following live':'Paused - scroll to the end to follow';
