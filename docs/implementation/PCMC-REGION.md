@@ -77,41 +77,43 @@ Run the server on this world:
 
 ## Scenario `pccoe_pawana_night`
 
-These are the report groups from DisruptionOps `scenarios.py`, in the same order, with the same notes and
-caller counts. Each incident keeps `disruptionops_category`, `ward_id`, `named_ward` and `callers`. The
-DisruptionOps ids are also registered as `engine.CATEGORY_ALIASES`.
+These are the report groups from DisruptionOps `scenarios.py`, in the same order, with the same text and
+caller counts.
 
-| Place (ward) | DisruptionOps category | Swarm category | Units required |
-|---|---|---|---|
-| Ravet bridge, Pawana bank (w-pc-03) | person_stranded | flood (terrace 9 m) | boat |
-| Morya Gosavi ghat (w-pc-05) | person_stranded | flood | boat |
-| Akurdi station underpass (w-pc-01) | flooded_road | blocked_route | pump, rescue |
-| Pimpri camp market (w-pc-07) | waterlogging | blocked_route | pump |
-| Chikhli–Kudalwadi chemical unit (w-pc-11) | fire | fire | fire_engine, ambulance |
-| Sane chowk (w-pc-11) | air_quality | medical | ambulance |
-| Nigdi Pradhikaran compound wall (w-pc-02) | structural_damage | trapped | rescue, engineering (JCB), ambulance |
-| Lane south of PCCOE gate (w-pc-01) | power_line | blocked_route | engineering |
-| Aditya Birla Hospital Marg (w-pc-08) | fallen_tree | blocked_route | engineering |
-| S B Patil school shelter (w-pc-03) | shelter_full | trapped | bus |
-| Ravet relief camp (see note) | supply_shortage | medical | water_tanker |
+**What each report carries.** Only what a caller would say:
 
-The required unit kinds follow DisruptionOps `incident_category_needs`:
-
-| DisruptionOps need | Unit kind |
+| Field | Meaning |
 |---|---|
-| water_rescue | boat |
-| dewatering | pump |
-| fire_suppression + medical_transport | fire_engine + ambulance |
-| search_rescue | rescue |
-| debris_clearance | JCB |
-| mass_transport | bus |
-| supply_delivery | water_tanker |
+| `disruptionops_category` | The DisruptionOps category id |
+| `report_text` | The report text |
+| `callers` | Caller count |
+| `reported_people` | People the text states, else None |
+| `vulnerable` | Vulnerability hints from the text, e.g. `elderly`, `family` |
+| `injuries` | Injury hints from the text, e.g. `trapped`, `respiratory` |
+| `hazards_reported` | Hazards from the text, e.g. `rising_water`, `gas`, `live_wire`, `chemical` |
+| `reported_at` | Time of the report |
+| `ward_id`, `named_ward` | The ward the site lies in, and the ward DisruptionOps names |
 
-Severities are the DisruptionOps `base_severity` values.
+There is no per-category response table.
 
-**Ward note.** By the Voronoi cells of migration 029, the real Ravet relief camp (D Y Patil Dnyanshanti
-School) lies in w-pc-01, while DisruptionOps files the report under Ravet (w-pc-03). The incident sits at
-the real camp and records both wards.
+**How the response is derived.** The units an incident needs come from REASONER's `plan_response`, in
+`swarm_ops.reasoning`. Until that lands, `fallback_required()` looks them up in
+`assets/operations/disruptionops-taxonomy.json`. For each capability the category needs
+(`incident_categories[].needs`), it picks the fleet kind with the highest `kinds_providing` score.
+
+Every incident records:
+- `required_hint_only = true`;
+- `required_source`, set to `reasoner`, `fallback:disruptionops-taxonomy`, or `fallback:engine-template`.
+
+`air_quality` has no needs in the taxonomy, so it falls back to the engine template.
+
+**Police.** The PC-POL units from migration 032 are spawned as kind `police` (model `police`). The
+taxonomy gives police `traffic_control`, and only `fire` and `structural_damage` need that capability, so
+those are the only incidents where police are tasked.
+
+**Ward note.** By the Voronoi cells of migration 029, the real Ravet relief camp lies in w-pc-01, while
+DisruptionOps files the report under Ravet (w-pc-03). The incident sits at the real camp and records both
+wards.
 
 **Docks and launch caps.** Docks are at the 8 dock sites, and the fleet is spread over them round-robin.
 `sim.dispatch_cap = {"per_incident": 3, "total": 8}`. The engine applies this only once it reads it;
@@ -128,4 +130,3 @@ the global `DOCK_DISPATCH_CAP` is 3.
 - Unit inventories are the DisruptionOps demo fleet.
 - Two boats are placed well away from the river: PC-BOAT-01 is mapped 374 m off the Pawana and PC-BOAT-03
   498 m off it. They launch from the nearest river point instead.
-- Police units (PC-POL) are in the world data but are not spawned, because the engine has no `police` kind.

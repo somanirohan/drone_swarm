@@ -123,9 +123,16 @@ class PawanaNightScenario(unittest.TestCase):
     def test_mirrors_disruptionops_reports(self):
         expected = [("person_stranded", 3), ("person_stranded", 2), ("flooded_road", 2), ("waterlogging", 1), ("fire", 2), ("air_quality", 1),
                     ("structural_damage", 2), ("power_line", 1), ("fallen_tree", 1), ("shelter_full", 1), ("supply_shortage", 1)]
-        self.assertEqual([(row[1], row[3]) for row in pcmc.PAWANA_NIGHT], expected)
-        for row in pcmc.PAWANA_NIGHT:
-            self.assertIn(pcmc.DISRUPTIONOPS_CATEGORIES[row[1]], ("medical", "flood", "fire", "trapped", "blocked_route"))
+        self.assertEqual([(r["category"], r["callers"]) for r in pcmc.PAWANA_NIGHT], expected)
+        for r in pcmc.PAWANA_NIGHT:
+            self.assertIn(pcmc.DISRUPTIONOPS_CATEGORIES[r["category"]], ("medical", "flood", "fire", "trapped", "blocked_route"))
+            # Reports carry what a caller says, never a prescribed response.
+            self.assertFalse({"required", "required_kinds", "units"} & set(r))
+        texts = {r["hotspot"]: r for r in pcmc.PAWANA_NIGHT}
+        self.assertEqual(texts["morya-ghat"]["vulnerable"], ["elderly"])
+        self.assertIn("trapped", texts["nigdi-wall"]["injuries"])
+        self.assertIn("live_wire", texts["pccoe-lane"]["hazards"])
+        self.assertIn("gas", texts["kudalwadi-chemical"]["hazards"])
 
     def test_incident_sites_in_the_named_wards(self):
         spots = {h["id"]: h for h in WORLD["hotspots"]}
@@ -133,25 +140,34 @@ class PawanaNightScenario(unittest.TestCase):
         keyword = {"ravet-bridge": "Ravet", "morya-ghat": "Chinchwad Gaon", "akurdi-underpass": "Akurdi", "pimpri-camp": "Pimpri",
                    "kudalwadi-chemical": "Chikhli", "sane-chowk": "Chikhli", "nigdi-wall": "Nigdi", "pccoe-lane": "Akurdi",
                    "birla-marg": "Thergaon", "sb-patil-shelter": "Ravet", "ravet-relief-camp": "Ravet"}
-        for row in pcmc.PAWANA_NIGHT:
-            spot = spots[row[0]]
-            self.assertIn(keyword[row[0]], names[spot["named_ward"]])
+        for r in pcmc.PAWANA_NIGHT:
+            hid = r["hotspot"]
+            spot = spots[hid]
+            self.assertIn(keyword[hid], names[spot["named_ward"]])
             site_ward = ward_at(spot["site_xy"])
             self.assertEqual(site_ward, spot["site_ward_id"])
-            if row[0] == "ravet-relief-camp":
+            if hid == "ravet-relief-camp":
                 # The real camp lies just inside the Akurdi cell of the migration's Voronoi; documented.
                 self.assertIn("ward_note", spot)
             else:
-                self.assertEqual(site_ward, spot["named_ward"], row[0])
-            if row[1] == "person_stranded":
+                self.assertEqual(site_ward, spot["named_ward"], hid)
+            if r["category"] == "person_stranded":
                 self.assertLess(spot["river_distance_m"], 60)
             else:
-                self.assertLess(spot["road_distance_m"], 120, row[0])
+                self.assertLess(spot["road_distance_m"], 120, hid)
 
-    def test_required_kinds_exist_in_the_fleet(self):
+    def test_fallback_needs_come_from_the_taxonomy(self):
         kinds = {pcmc.UNIT_KINDS[u["kind"]] for u in WORLD["units"] if u["kind"] in pcmc.UNIT_KINDS}
-        for row in pcmc.PAWANA_NIGHT:
-            self.assertTrue(set(row[7]) <= kinds, row)
+        self.assertIn("police", kinds)
+        tax = pcmc.taxonomy()
+        for r in pcmc.PAWANA_NIGHT:
+            required = pcmc.fallback_required(r["category"], kinds)
+            self.assertTrue(set(required) <= kinds, r["category"])
+            needs = next(c["needs"] for c in tax["incident_categories"] if c["id"] == r["category"])
+            self.assertEqual(len(required) <= len(needs), True)
+        # Migration 032: fire and collapse need traffic_control, which only police provide.
+        self.assertIn("police", pcmc.fallback_required("fire", kinds))
+        self.assertNotIn("police", pcmc.fallback_required("flooded_road", kinds))
 
     def test_dock_sites_are_real_places(self):
         docks = WORLD["dock_sites"]
