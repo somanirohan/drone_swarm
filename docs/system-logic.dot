@@ -1,0 +1,57 @@
+// Render: dot -Tsvg docs/system-logic.dot -o docs/system-logic.svg
+digraph system_logic {
+  rankdir=TB; compound=true; fontname="Helvetica"; node [shape=box, style="rounded,filled", fillcolor="#f4f6f8", fontname="Helvetica", fontsize=10]; edge [fontname="Helvetica", fontsize=9];
+  labelloc=t; label="Logic flows: DisruptionOps (reference, commit 1697407) and the swarm agency (this repo)";
+
+  subgraph cluster_do {
+    label="DisruptionOps: report -> incident -> needs -> CP-SAT replan -> gate -> dispatch -> observe"; style=filled; fillcolor="#eef3fb"; color="#7a9cc6";
+    rep   [label="Report intake\nincidents/intake.py\nPOST /reports, /ingest/reports,\nmesh IDX1, LoRa sensors, swarm feed"];
+    llm1  [label="Text help (LLM optional)\nparse.py classify, severity.py,\nclustering.py adjudicate", fillcolor="#fff3d6"];
+    trust [label="Trust + dedup + severity\ntrust.py, clustering.py,\nduplicates.py (deterministic)"];
+    inc   [label="Incident + needs\n(capability demands from taxonomy)"];
+    ev    [label="Event log\nworld/events.py (append-only)"];
+    router[label="Event router\nagents/event_router.py\n(leader lease, debounce)"];
+    cmdr  [label="Incident Commander\nagents/commander.py\nLLM tool loop, max 6 steps", fillcolor="#fff3d6"];
+    subgraph cluster_graph {
+      label="LangGraph cycle: agents/graph.py"; style=dashed; color="#7a9cc6";
+      g1[label="guard_in\nkill switch, run storm"];
+      g2[label="triage\nworst open severity"];
+      g3[label="command\nwakes Commander if S>=5"];
+      g4[label="fanout/sense x4\nneeds, fleet, hazards, risk"];
+      g5[label="assess -> domain\nper-domain shortfall + memory"];
+      g6[label="optimise\nreplan.preview -> CP-SAT dry run\nsolver/allocation.py"];
+      g7[label="validate\nguardrails.check_plan\n(retry x3, else give_up)"];
+      g8[label="policy_gate\nautonomy, rejection memory,\nS3+ stranding, unit-move cap"];
+      g9[label="human_approval\nLangGraph interrupt()", fillcolor="#fde2e2"];
+      g10[label="dispatch\ndrift re-check, write\nassignments + field tasks"];
+      g11[label="observe\nsummary, event"];
+      g1->g2->g3->g4->g5->g6->g7->g8; g3->g4 [style=dotted]; g8->g9 [label="needs officer"]; g8->g10 [label="auto"]; g9->g10 [label="approved"]; g10->g11;
+    }
+    units [label="Units and crews\nunits/service.py position reports,\nreroute, ops/operations.py cancel"];
+    rep->llm1->trust->inc->ev->router; trust->ev; ev->cmdr [style=dashed, label="nudge"]; router->g1 [lhead=cluster_graph];
+    cmdr->g8 [style=dashed, label="propose_action"];
+    g11->units; units->ev [label="position/arrival events"]; g11->router [style=dotted, label="next cycle"];
+  }
+
+  subgraph cluster_sw {
+    label="Swarm agency (swarm_ops): request -> accept/decline -> launch -> brief -> ask for ground -> hand off -> complete"; style=filled; fillcolor="#eef8ee"; color="#7ab87a";
+    cc    [label="Command center\nswarm_ops/command_center.py\n(plays DisruptionOps' role)", fillcolor="#fff3d6"];
+    srv   [label="Server: HTTP + WS /ops/ws\nserver.py: token check, rate limit,\nack cache (idempotent ids), journal"];
+    ar    [label="engine._agency_request\nbounds, no-fly, capacity,\nlaunch cap, energy-feasible route"];
+    inc2  [label="Incident (merged or new)\nengine._incident"];
+    alloc [label="engine._allocate\ndeterministic feasible bids,\nA* flight grid + energy"];
+    bt    [label="Drone behaviour\nengine._behavior / step()\nsearch zones, confirm, assess, return"];
+    brief [label="Briefing\n_drone_arrival_brief\nresource_request events"];
+    ext   [label="external_resource_update\n(ground = orchestrator)\nor local mock ground sim"];
+    ack   [label="_ack handoff\nbriefing revision check,\nrecall drone"];
+    done  [label="Resolved\nrequired kinds completed"];
+    ev2   [label="Events + messages\nORCHESTRATOR_STATUS, /ops/events,\n/ops/messages, snapshot over WS"];
+    cc->srv [label="agency_request\n(integration token)"]; srv->ar->inc2->alloc->bt->brief;
+    brief->ev2 [label="resource_request"]; ev2->cc [label="accepted, launched, on_scene,\nbriefing, resource_request,\nsupply_delivered, completed"];
+    cc->ext [label="commit units\n(drive to scene)"]; ext->ack; ack->done; done->ev2;
+    ar->ev2 [label="accepted / declined"];
+  }
+
+  cc->rep [style=dashed, color="#aa5500", label="REAL mode adapter\n(skeleton): POST /reports,\n/agency-requests, GET /ops"];
+  ev2->rep [style=dashed, color="#aa5500", label="integrations bridge:\nobservations -> /drone/operations"];
+}

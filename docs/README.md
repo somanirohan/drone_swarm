@@ -10,6 +10,9 @@ Reference DisruptionOps version for all integration documents: commit `bd21179` 
 | [ALGORITHMS.md](ALGORITHMS.md) | The algorithms the engine really uses (A*, Dijkstra, bidding, zones, energy), with function names and honest limits, and what is not used. |
 | [CAPABILITIES.md](CAPABILITIES.md) | What works, what is partial, what is planned, and how each was verified. Honest about being a kinematic demo. |
 | [FOLDER-LAYOUT.md](FOLDER-LAYOUT.md) | Folder structure (executed 2026-10-10): final tree, old-to-new move map, compatibility shims. |
+| [PLAN-V3.md](PLAN-V3.md) | This round: region scenario, command center and agents, agentic architecture, civilian traffic, path fixes; owners, acceptance, status. |
+| [SYSTEM-LOGIC-MAP.md](SYSTEM-LOGIC-MAP.md) | Every logic file of DisruptionOps and the swarm, one line each, plus end-to-end flows ([system-logic.dot](system-logic.dot), [system-logic.svg](system-logic.svg)). |
+| [AGENTIC-ASSESSMENT.md](AGENTIC-ASSESSMENT.md) | Are the agents really agentic? Where `graph.py` is, what is LLM or LangGraph driven, what the swarm lacks. |
 
 ## DisruptionOps integration (`integration/`)
 

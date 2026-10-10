@@ -126,6 +126,23 @@ class OperationsServer:
             path = '/web/ops/operations.html'
         if path == '/legacy':
             path = '/web/legacy/index.html'
+        if path == '/ops/messages':
+            # Command-center <-> agent message log (engine `messages`); paged by message id: ?after=<id>&limit=<n>.
+            params = parse_qs(url.query)
+            try:
+                limit = min(500, max(1, int(params.get('limit', ['100'])[0])))
+            except ValueError:
+                return self._json(HTTPStatus.BAD_REQUEST, {'error': 'limit must be an integer'})
+            messages = getattr(self.engine, 'messages', None)
+            if messages is None:
+                messages = self.engine.snapshot(include_world=False).get('messages', [])
+            after = params.get('after', [''])[0]
+            if after:
+                ids = [m.get('id') for m in messages]
+                messages = messages[ids.index(after) + 1:] if after in ids else messages
+            page = list(messages[:limit])
+            return self._json(HTTPStatus.OK, {'run_id': self.engine.run_id, 'messages': page, 'next_after': page[-1].get('id') if page else after,
+                                              'available': hasattr(self.engine, 'messages') or 'messages' in self.engine.snapshot(include_world=False)})
         # Old URLs from before the web/ops + web/legacy split; already-shared links keep working.
         path = OLD_WEB_PATHS.get(path, path)
         prefix, _, tail = path.lstrip('/').partition('/')
