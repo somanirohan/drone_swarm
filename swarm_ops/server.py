@@ -114,6 +114,10 @@ class OperationsServer:
             return self._json(HTTPStatus.OK, {'control_token': self.control_token, 'can_control': True, 'simulation_only': True})
         if path == '/ops/state':
             return self._json(HTTPStatus.OK, self.engine.snapshot())
+        if path == '/ops/scenarios':
+            from swarm_ops.engine import scenario_catalog
+            return self._json(HTTPStatus.OK, {'scenarios': scenario_catalog(), 'current': self.engine.scenario.get('id'),
+                                              'world_id': getattr(self.engine, 'world_id', None)})
         if path == '/ops/events':
             params = parse_qs(url.query)
             try:
@@ -307,9 +311,12 @@ class OperationsServer:
 
 async def main_async(args):
     from swarm_ops.engine import OperationsSimulation
+    import swarm_ops.scenarios  # noqa: F401  registers pcmc-region and its scenarios
     world_path = ROOT / 'assets' / 'operations' / 'pune-world.json'
     world = json.loads(world_path.read_text(encoding='utf8')) if world_path.exists() else None
-    engine = OperationsSimulation(world=world, seed=args.seed, fleet_size=args.fleet)
+    # --world pcmc-region starts on a PCMC scenario; built-in scenarios keep the Pune district world.
+    scenario = args.scenario or ('pccoe_pawana_night' if args.world == 'pcmc-region' else 'rooftop_flood')
+    engine = OperationsSimulation(world=world, seed=args.seed, fleet_size=args.fleet, scenario=scenario)
     server = OperationsServer(engine, host=args.host, port=args.port, frame_hz=args.frame_hz,
                               control_token=os.environ.get('OPS_CONTROL_TOKEN'))
     runtime_dir = ROOT / '.cache' / 'operations'
@@ -333,6 +340,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--fleet', type=int, default=20)
     parser.add_argument('--frame-hz', type=int, default=10)
+    parser.add_argument('--world', choices=('pune-district', 'pcmc-region'), default='pune-district')
+    parser.add_argument('--scenario', default=None, help='starting scenario id (see /ops/scenarios)')
     args = parser.parse_args()
     try:
         asyncio.run(main_async(args))
