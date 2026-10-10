@@ -68,7 +68,7 @@ There is already an older swarm listener inside DisruptionOps (`backend/app/dron
 
 ## 2. The swarm's current interface (exists today)
 
-Base: `http://localhost:8787` (loopback by default; public viewers via a Cloudflare tunnel are read-only). Protocol string `disruptionops.swarm.v2`, snapshot `schema_version` 2. Source: `operations_server.py`, `docs/implementation/websocket-protocol.md`.
+Base: `http://localhost:8787` (loopback by default; public viewers via a Cloudflare tunnel are read-only). Protocol string `disruptionops.swarm.v2`, snapshot `schema_version` 2. Source: `swarm_ops/server.py`, `docs/implementation/websocket-protocol.md`.
 
 ### HTTP
 
@@ -236,7 +236,7 @@ Pausing is an in-memory flag in DisruptionOps with a persisted copy; if Disrupti
 - Swarm `run_id` is a fresh UUID every scenario start or reset. Local ids (`I001`, `D01`, `R01`) repeat between runs, so every message carries `run_id`.
 - DisruptionOps: either leave `sim_run_id` NULL in a separate demo database (what the earlier patch does) or create a `sim_runs` row per swarm run (`scenario_key` = scenario id, `seed` = seed, `mode='sim'`) and write events through a SimClock so they carry `sim_run_id`. Shared `resources` rows are not scoped (migrations doc, section 4), so use a separate database in both cases.
 - Idempotency: every outbound item has `<run_id>:<seq>`; DisruptionOps stores the key (the earlier patch's `swarm_operations_events` table is a reasonable shape) and returns the original response for a repeat. Same key with a different body is rejected with 409.
-- The old patch's migration name `029_swarm_operations_demo.sql` collides with upstream 029; use 030.
+- The old patch's migration name `029_swarm_operations_demo.sql` collides with upstream 029; use 030 (renamed in this repository: `swarm_ops/integrations/.../030_swarm_operations_demo.sql`).
 - Dedup of sightings uses the intake's category radius/window (e.g. `person_stranded` 150 m / 15 min). The swarm must not re-file a site inside that window.
 
 ## 8. Authentication

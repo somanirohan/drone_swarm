@@ -64,7 +64,7 @@ Goal: make the engine something that can be reasoned about and tested, not just 
 
 | Step | Work | Notes |
 |---|---|---|
-| 2.1 | Split `ops_simulation.py` into modules: `world` (map, roads, flood), `fleet` (drones, docks, payloads), `dispatch` (candidate generation, auction, assignment), `handoff` (briefing revisions, acknowledgment), `signals` (SOS, links, relay), `energy` (budget and recharge), `faults` (crash, battery, link, reconciliation), `scenarios`, `events` | Pure move first; tests must pass before any behaviour change. |
+| 2.1 | Split `swarm_ops/engine.py` (was `ops_simulation.py`) into modules: `world` (map, roads, flood), `fleet` (drones, docks, payloads), `dispatch` (candidate generation, auction, assignment), `handoff` (briefing revisions, acknowledgment), `signals` (SOS, links, relay), `energy` (budget and recharge), `faults` (crash, battery, link, reconciliation), `scenarios`, `events` | Pure move first; tests must pass before any behaviour change. |
 | 2.2 | Event-sourced state: every mutation emits an event; snapshot is a projection | Matches how DisruptionOps works (append-only `events` with `causation_id`). |
 | 2.3 | Deterministic seeds everywhere (one `Random` per module derived from the run seed) | Fixes R13. |
 | 2.4 | Scenario DSL (D9) | Lets the user add a case without touching code. |
@@ -103,7 +103,7 @@ Order matters (see the migrations doc, section 5).
 | Simulated runs move shared `resources` rows | Contaminates live data | Separate database only. |
 | Old PyBullet listener in DisruptionOps conflicts | Confusing double ingestion | Disable it when the new connector is enabled. |
 | The report claims more than it proves | Loss of trust | Keep the CAPABILITIES "must not assume" list and the `simulation_only` flag. |
-| Public tunnel launch blocked by tool policy once | Cannot demo remotely | User runs `share-with-friend.ps1` themselves. |
+| Public tunnel launch blocked by tool policy once | Cannot demo remotely | User runs `scripts\share-with-friend.ps1` themselves. |
 | Performance in dense scenes (about 90 airborne over 100 ms) | Stutter | Keep the telemetry budget as a test (D1). |
 | A real fleet is a safety issue | Misuse | The exercise stays simulation only; any hardware move needs its own safety review. |
 

@@ -1,6 +1,45 @@
 # Folder layout: current problems, target, and a safe move plan
 
-Written 2026-10-10. **This document is a plan. Nothing has been moved.** The lead executes it after the BACKEND and FRONTEND agents finish, because `ops_simulation.py`, `web/operations.*` and the catalog are being edited right now (git status shows them modified or untracked).
+Written 2026-10-10 as a plan. **Executed 2026-10-10** in five commits ("Reorg 1/5" to "Reorg 5/5"); see section 0 for the final tree and the differences from the plan. Sections 1 to 6 are kept as the original plan.
+
+## 0. Executed result
+
+```
+drone_swarm/
+  README.md                 short overview, run/share/test commands
+  ops_simulation.py         SHIM -> swarm_ops.engine (sys.modules alias; old imports keep working)
+  operations_server.py      SHIM -> swarm_ops.server (`python operations_server.py --port N --fleet N` still works)
+  swarm_ops/                __init__.py  engine.py  server.py
+    integrations/           disruptionops_bridge.py  requirements-tests.txt
+                            disruptionops_patch/backend/{app/drone/operations.py, migrations/030_swarm_operations_demo.sql}
+  web/                      ops/ (operations.html/.css/.js)  legacy/ (index.html)  vendor/ (three.js)
+  assets/                   operations/  legacy/ (city-ready/, apocalyptic-city/, CITY-SOURCE.md)
+  scripts/                  run-operations.ps1  share-with-friend.ps1  setup-ops.ps1
+    legacy/                 run-disaster.ps1  run-drones.ps1  run-web.ps1  setup.ps1  start-all.ps1
+  tools/                    prepare_operations_{map,heights,terrain}.py  build_agency_catalog.py
+  requirements/             requirements.txt (legacy)  requirements-ops.txt  requirements-geodata.txt
+  tests/                    test_ops_simulation.py  test_operations_server.py  test_disruptionops_{bridge,contract}.py
+                            operations_acceptance.py  operations_clients_acceptance.py  operations-browser.cjs  operations-client-example.mjs
+    legacy/                 __init__.py  test_agentic_swarm.py  test_ai_planner.py  test_jev_planner.py
+  examples/                 unchanged
+  legacy/pybullet/          disaster_demo.py ... web_stream.py  plot-flight.py
+    tools/                  prepare_city_assets.py
+    docs/                   the seven legacy guides
+    results/                generated JSON (git-ignored)
+  docs/                     README.md (index)  PLAN.md  CAPABILITIES.md  ALGORITHMS.md  FOLDER-LAYOUT.md
+                            implementation/  integration/  research/  reference/
+    history/resume.md       local only, deliberately not committed (.git/info/exclude)
+  gym-pybullet-drones/      vendored, not moved
+```
+
+Differences from the plan below:
+
+- Acceptance scripts stay directly in `tests/` (not `tests/acceptance/`), and `docs/implementation/*.json` results were not moved; their commands and output paths are unchanged.
+- The server serves `/` from `web/ops/operations.html` and `/legacy` from `web/legacy/index.html`; the old URLs `/web/operations.html|.css|.js` and `/web/index.html` are aliased to the new files (tested in `tests/test_operations_server.py`), so already-shared links work. Traversal is still rejected.
+- Legacy modules import each other by bare name; `tests/legacy/*` put `legacy/pybullet` on `sys.path`. Legacy result files are written to `legacy/pybullet/results/`. `assets/legacy/city-ready/manifest.json` texture paths now start with `assets/legacy/`.
+- The launch scripts start the server with `python -m swarm_ops.server` from the repository root.
+- One command runs all unit tests: `python -m unittest discover -s tests -p "test_*.py"` (100 tests at the time of the move).
+- The shims can be removed once nobody uses the old import or start commands.
 
 ## 1. What is wrong today
 

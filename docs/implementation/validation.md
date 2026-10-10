@@ -15,9 +15,9 @@ Reproducible commands:
 The friend handoff's JavaScript/Python reference clients additionally passed **20 acceptance checks** (8 Python, 12 JavaScript) against an isolated real localhost server. These cover read-only access, cached world geometry, operator permission, commands and observed state, duplicate/stale-run protection, reset handling and automatic JavaScript reconnection. This is separate from the 83 unit/transport tests above. The live 50-aircraft demo was also read without issuing a command.
 
 ```powershell
-.\.conda-drones\python.exe -m unittest test_operations_server test_ops_simulation -q
+.\.conda-drones\python.exe -m unittest discover -s tests -p "test_*.py" -q   # everything (ops, server, DisruptionOps, legacy)
 .\.conda-drones\python.exe -m unittest discover -s tests -p 'test_disruptionops_*.py' -q
-.\.conda-drones\python.exe -m unittest test_agentic_swarm test_ai_planner test_jev_planner -q
+.\.conda-drones\python.exe -m unittest tests.legacy.test_agentic_swarm tests.legacy.test_ai_planner tests.legacy.test_jev_planner -q
 .\.conda-drones\python.exe tests/operations_acceptance.py
 node tests/operations-browser.cjs
 .\.conda-drones\python.exe tests/operations_clients_acceptance.py

@@ -5,8 +5,8 @@ The new operations experience runs independently inside `drone_swarm`. It combin
 ## Run locally
 
 ```powershell
-.\.conda-drones\python.exe -m pip install -r requirements-ops.txt
-.\run-operations.ps1 -Fleet 50 -Seed 42
+.\.conda-drones\python.exe -m pip install -r requirements\requirements-ops.txt
+.\scripts\run-operations.ps1 -Fleet 50 -Seed 42
 ```
 
 Open `http://localhost:8787`. The existing prepared assets allow offline startup; the UI uses locally vendored Three.js. A direct localhost session receives the exercise operator token. Public tunnel sessions receive a view-only session. The private operator URL is stored in `.cache/operations/operator-url.txt`; do not commit that file.
@@ -14,7 +14,7 @@ Open `http://localhost:8787`. The existing prepared assets allow offline startup
 To start a temporary public viewer while computing locally:
 
 ```powershell
-.\run-operations.ps1 -Fleet 50 -Tunnel
+.\scripts\run-operations.ps1 -Fleet 50 -Tunnel
 ```
 
 The URL appears in `.cache/operations/tunnel.log`. Closing the runner stops its tunnel. Quick Tunnel URLs are temporary and change after restarting; they have no production uptime guarantee. See [Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
@@ -28,11 +28,11 @@ This is a geographically grounded approximation. It does not reproduce Google sa
 Data preparation is separate from runtime:
 
 ```powershell
-.\.conda-drones\python.exe prepare_operations_terrain.py
+.\.conda-drones\python.exe tools\prepare_operations_terrain.py
 # Optional tooling dependencies for regenerating predicted heights:
-.\.conda-drones\python.exe -m pip install -r requirements-geodata.txt
-.\.conda-drones\python.exe prepare_operations_heights.py
-.\.conda-drones\python.exe prepare_operations_map.py --offline
+.\.conda-drones\python.exe -m pip install -r requirements\requirements-geodata.txt
+.\.conda-drones\python.exe tools\prepare_operations_heights.py
+.\.conda-drones\python.exe tools\prepare_operations_map.py --offline
 ```
 
 The height downloader reads bounded GeoTIFF windows rather than downloading entire regional files. The first preparation retrieved about 8.3 MiB. Dataset attribution and prediction limitations are recorded in the assets. Sources: [OSM attribution and license](https://www.openstreetmap.org/copyright), [Google Open Buildings 2.5D](https://sites.research.google/gr/open-buildings/temporal/), [SRTM dataset](https://www.opentopodata.org/datasets/srtm/).
@@ -72,7 +72,7 @@ Road vehicles use a road graph. Flooded edges and damaged crossings are excluded
 
 ## Components and timing
 
-`ops_simulation.py` owns domain state and deterministic decisions. `operations_server.py` owns HTTP, scoped controls, snapshots, acknowledgments, replay and per-client backpressure. `web/operations.*` owns 3D rendering and the UI. The server steps the mission approximately every 50 ms; telemetry defaults to 10 Hz, while browser rendering/interpolation follows its animation loop.
+`swarm_ops/engine.py` owns domain state and deterministic decisions. `swarm_ops/server.py` owns HTTP, scoped controls, snapshots, acknowledgments, replay and per-client backpressure. `web/ops/operations.*` owns 3D rendering and the UI. The server steps the mission approximately every 50 ms; telemetry defaults to 10 Hz, while browser rendering/interpolation follows its animation loop.
 
 ![Local architecture](operations-architecture.svg)
 
@@ -87,7 +87,7 @@ The local WebSocket is a visualization and exercise API. A future physical fleet
 Run the local suites:
 
 ```powershell
-.\.conda-drones\python.exe -m unittest test_operations_server test_ops_simulation -v
+.\.conda-drones\python.exe -m unittest discover -s tests -p "test_*.py" -v
 .\.conda-drones\python.exe -m unittest discover -s tests -p 'test_disruptionops_*.py' -v
 .\.conda-drones\python.exe tests/operations_acceptance.py
 # Optional browser acceptance tooling:

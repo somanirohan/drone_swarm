@@ -129,4 +129,4 @@ The orchestrator sends `agency_request` (sos/assess/supply/overwatch, idempotent
 
 The build has 41 domain tests (including dock_fire, agency-request and snapshot-contract tests), 24 actual localhost transport tests, 19 optional connector/adapter tests and 15 existing planner regressions. Nine recorded 50-aircraft scenario/fault replays completed the modeled agency response. Those results establish the checked cases, not every possible edge case or real flight safety. Dense approximately 90-airborne stress occasionally exceeds the 100 ms telemetry budget.
 
-Source files: `ops_simulation.py`, `operations_server.py`, `test_ops_simulation.py`, `test_operations_server.py`. Integration instructions: `FRIEND-WEBSOCKET-HANDOFF.md`.
+Source files: `swarm_ops/engine.py`, `swarm_ops/server.py`, `tests/test_ops_simulation.py`, `tests/test_operations_server.py`. Integration instructions: `FRIEND-WEBSOCKET-HANDOFF.md`.

@@ -9,7 +9,7 @@ Reference DisruptionOps version for all integration documents: commit `bd21179` 
 | [PLAN.md](PLAN.md) | The user's requirements as numbered items, deliverables with acceptance tests, phases, risks, definition of done. |
 | [ALGORITHMS.md](ALGORITHMS.md) | The algorithms the engine really uses (A*, Dijkstra, bidding, zones, energy), with function names and honest limits, and what is not used. |
 | [CAPABILITIES.md](CAPABILITIES.md) | What works, what is partial, what is planned, and how each was verified. Honest about being a kinematic demo. |
-| [FOLDER-LAYOUT.md](FOLDER-LAYOUT.md) | Target folder structure, old-to-new move map, references to fix, safe order. Plan only; nothing moved. |
+| [FOLDER-LAYOUT.md](FOLDER-LAYOUT.md) | Folder structure (executed 2026-10-10): final tree, old-to-new move map, compatibility shims. |
 
 ## DisruptionOps integration (`integration/`)
 
@@ -26,7 +26,7 @@ Reference DisruptionOps version for all integration documents: commit `bd21179` 
 | [implementation/implementation-plan.md](implementation/implementation-plan.md) | Earlier plan and run instructions for the Pune simulator. Superseded in scope by PLAN.md. |
 | [implementation/websocket-protocol.md](implementation/websocket-protocol.md) | `disruptionops.swarm.v2` WebSocket and HTTP contract, including the agency/orchestrator commands. |
 | [implementation/FRIEND-WEBSOCKET-HANDOFF.md](implementation/FRIEND-WEBSOCKET-HANDOFF.md) | Full connection guide; section A has the new fields and commands, the view-only rule, and how to detect and plot a dispatched ambulance with real payloads. |
-| `../examples/operations_ws_client.py`, `../examples/operations-websocket-client.mjs` | Reference clients; print dispatches, signals, resource requests and agency metrics; optional `random_incident` with an operator token. |
+| `../examples/operations_ws_client.py`, `../examples/operations-websocket-client.mjs` | Reference clients (code: `../swarm_ops/`, viewer: `../web/ops/`); print dispatches, signals, resource requests and agency metrics; optional `random_incident` with an operator token. |
 | [implementation/HANDLED-CASES.md](implementation/HANDLED-CASES.md) | Thirteen scenarios the engine handles, with limits. |
 | [implementation/validation.md](implementation/validation.md) | Test counts and commands from the last local verification. |
 | [implementation/disruptionops-integration.md](implementation/disruptionops-integration.md) | Earlier integration contract. **Partly outdated**: written against 4e87ade; see the migrations doc, section 8 and 9. |

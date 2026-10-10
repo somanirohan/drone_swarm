@@ -119,7 +119,7 @@ GET /ops/events?after=123&limit=100
 
 Response contains `events` with increasing durable SQLite `cursor` values and `next_cursor`. Store the last processed cursor, deduplicate events using `(run_id,id)`, and request subsequent pages (maximum 500). SQLite events survive server restart; simulation state and command acknowledgment cache do not. There is currently no automatic journal retention policy.
 
-Other endpoints: `GET /health` reports protocol/client/integration status; `GET /ops/state` provides a current full snapshot. `/`, `/web/` and `/assets/` serve only allowlisted UI/assets; traversal outside those roots is rejected. The default bind is loopback. Cloudflare terminates public TLS and forwards the local HTTP/WS service; it does not run the simulation.
+Other endpoints: `GET /health` reports protocol/client/integration status; `GET /ops/state` provides a current full snapshot. `/`, `/web/` and `/assets/` serve only allowlisted UI/assets (`/` is `web/ops/operations.html`, `/legacy` is `web/legacy/index.html`; old `/web/operations.*` URLs are aliased); traversal outside those roots is rejected. The default bind is loopback. Cloudflare terminates public TLS and forwards the local HTTP/WS service; it does not run the simulation.
 
 ## Future DisruptionOps boundary
 

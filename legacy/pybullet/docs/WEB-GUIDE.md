@@ -15,7 +15,7 @@ Start the simulation and viewer:
 
 ```powershell
 cd D:\drone_swarm
-powershell -ExecutionPolicy Bypass -File .\run-web.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\legacy\run-web.ps1
 ```
 
 Open <http://localhost:8765> on your own laptop. You should see the district with 12 drones taking off.
@@ -92,7 +92,7 @@ Copy and send this part.
 
 ## What was added
 
-- `web_stream.py`: serves the page and the WebSocket on one port, and broadcasts frames at 12 Hz.
-- `web/index.html` and `web/vendor/`: three.js viewer, with three.js vendored so it needs no CDN.
-- `disaster_demo.py --web`: runs the same physics headless in real time and streams it.
-- `run-web.ps1`: launcher.
+- `legacy/pybullet/web_stream.py`: serves the page and the WebSocket on one port, and broadcasts frames at 12 Hz.
+- `web/legacy/index.html` and `web/vendor/`: three.js viewer, with three.js vendored so it needs no CDN.
+- `legacy/pybullet/disaster_demo.py --web`: runs the same physics headless in real time and streams it.
+- `scripts/legacy/run-web.ps1`: launcher.

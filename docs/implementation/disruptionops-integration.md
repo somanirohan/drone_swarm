@@ -4,9 +4,9 @@ Current requested milestone is the local WebSocket simulation and robust local t
 
 ## What exists now
 
-`integrations/disruptionops_bridge.py` is a runnable standard-library client with a SQLite WAL outbox, stable event IDs, bounded HTTP requests, explicit acknowledgments, retries/backoff, run scoping, and simulator-to-geographic coordinate conversion. Disabled mode creates no outbox or network traffic. Its fake HTTP tests verify transport behavior; they do not prove integration with a real database or allocator.
+`swarm_ops/integrations/disruptionops_bridge.py` is a runnable standard-library client with a SQLite WAL outbox, stable event IDs, bounded HTTP requests, explicit acknowledgments, retries/backoff, run scoping, and simulator-to-geographic coordinate conversion. Disabled mode creates no outbox or network traffic. Its fake HTTP tests verify transport behavior; they do not prove integration with a real database or allocator.
 
-`integrations/disruptionops_patch/backend/app/drone/operations.py` and `backend/migrations/029_swarm_operations_demo.sql` are an **unmounted patch proposal** for the DisruptionOps clone at commit `4e87ade9dc5da76ae55651388fd8199aba6cd36a`. They adapt its actual existing intake, resources, assignments, taxonomy, and CP-SAT replan functions. No generic invented dispatch endpoint is presented as implemented in that repository.
+`swarm_ops/integrations/disruptionops_patch/backend/app/drone/operations.py` and `backend/migrations/030_swarm_operations_demo.sql` (renamed from 029, which upstream now uses) are an **unmounted patch proposal** for the DisruptionOps clone at commit `4e87ade9dc5da76ae55651388fd8199aba6cd36a`. They adapt its actual existing intake, resources, assignments, taxonomy, and CP-SAT replan functions. No generic invented dispatch endpoint is presented as implemented in that repository.
 
 ## Ownership
 
@@ -105,7 +105,7 @@ Coordinates in all simulator payloads are `[east, north, up]` in metres, anchor 
 ## Local validation completed
 
 ```powershell
-.\.conda-drones\python.exe -m pip install -r integrations/requirements-tests.txt
+.\.conda-drones\python.exe -m pip install -r swarm_ops/integrations/requirements-tests.txt
 .\.conda-drones\python.exe -m unittest discover -s tests -p 'test_disruptionops_*.py' -v
 ```
 

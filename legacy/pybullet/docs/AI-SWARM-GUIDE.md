@@ -14,7 +14,7 @@ Then choose a function-calling model your API account supports:
 
 ```powershell
 cd "C:\Users\tusha\OneDrive\Desktop\simulation"
-powershell -ExecutionPolicy Bypass -File .\run-disaster.ps1 -AI openai -Model YOUR_MODEL_NAME
+powershell -ExecutionPolicy Bypass -File .\scripts\legacy\run-disaster.ps1 -AI openai -Model YOUR_MODEL_NAME
 ```
 
 The launcher checks key/model configuration before opening the simulator.
@@ -26,7 +26,7 @@ Requests contain simulation observations; API usage may incur charges.
 With Ollama running and a suitable instruction model already downloaded:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run-disaster.ps1 -AI ollama -Model YOUR_INSTALLED_MODEL
+powershell -ExecutionPolicy Bypass -File .\scripts\legacy\run-disaster.ps1 -AI ollama -Model YOUR_INSTALLED_MODEL
 ```
 
 The local adapter calls `http://127.0.0.1:11434/api/chat` with a JSON schema; all responses are validated locally.

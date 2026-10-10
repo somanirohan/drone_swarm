@@ -1,6 +1,6 @@
 # Algorithms the engine really uses
 
-Read from `ops_simulation.py` (1,707 lines at the time of writing) on 2026-10-10. Function names are real; line numbers drift, so search by name. Each entry says what it does and its honest limits. The engine is a **single-process, centralised harness**: one `OperationsSimulation` object owns all state and "drone bids" are computed by it, not by independent agents.
+Read from `ops_simulation.py`, now `swarm_ops/engine.py` (1,707 lines at the time of writing) on 2026-10-10. Function names are real; line numbers drift, so search by name. Each entry says what it does and its honest limits. The engine is a **single-process, centralised harness**: one `OperationsSimulation` object owns all state and "drone bids" are computed by it, not by independent agents.
 
 ## 1. Routing
 

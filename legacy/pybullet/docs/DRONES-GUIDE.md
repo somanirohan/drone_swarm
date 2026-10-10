@@ -5,14 +5,14 @@ Repository: https://github.com/learnsyslab/gym-pybullet-drones (main snapshot do
 From this simulation folder, use:
 
 ```powershell
-.\run-drones.ps1                         # Three drones following circles, graphical window
-.\run-drones.ps1 -Headless               # Same flight without a window
-.\run-drones.ps1 -Example pid_velocity   # Velocity command example
-.\run-drones.ps1 -Example downwash       # Airflow interaction between stacked drones
-.\run-drones.ps1 -Example mrac           # Model reference adaptive control
-.\run-drones.ps1 -Example learn          # PPO hover training (potentially long)
-.\run-drones.ps1 -Example learn -Multiagent
-.\run-drones.ps1 -Example play -ModelPath 'results\YOUR_RUN\best_model.zip'
+.\scripts\legacy\run-drones.ps1                         # Three drones following circles, graphical window
+.\scripts\legacy\run-drones.ps1 -Headless               # Same flight without a window
+.\scripts\legacy\run-drones.ps1 -Example pid_velocity   # Velocity command example
+.\scripts\legacy\run-drones.ps1 -Example downwash       # Airflow interaction between stacked drones
+.\scripts\legacy\run-drones.ps1 -Example mrac           # Model reference adaptive control
+.\scripts\legacy\run-drones.ps1 -Example learn          # PPO hover training (potentially long)
+.\scripts\legacy\run-drones.ps1 -Example learn -Multiagent
+.\scripts\legacy\run-drones.ps1 -Example play -ModelPath 'results\YOUR_RUN\best_model.zip'
 ```
 
 Flight logs are saved in gym-pybullet-drones/results (NumPy archives and CSV folders). The initial headless run is also saved in results at the workspace root. flight-results.png shows its trajectories and altitude.

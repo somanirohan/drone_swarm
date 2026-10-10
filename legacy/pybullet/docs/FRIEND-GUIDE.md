@@ -126,7 +126,7 @@ ws.onclose = () => setTimeout(() => location.reload(), 2000); // or reconnect
 | `/assets/city-ready/manifest.json` | The same building manifest as in `init`. |
 | `/assets/city-ready/<mesh>.obj` | Building meshes (Z-up OBJ, with UVs). Gzip is supported. |
 | `/<texture path from the manifest>` | JPG textures. |
-| `/web/index.html`, `/web/vendor/*` | Source of the reference viewer. |
+| `/web/legacy/index.html`, `/web/vendor/*` | Source of the reference viewer. |
 
 Only `web/` and `assets/` are served. There are no other endpoints.
 

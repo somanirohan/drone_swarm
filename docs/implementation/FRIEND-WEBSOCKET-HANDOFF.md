@@ -291,14 +291,15 @@ Notes: units are the real PCMC fleet of DisruptionOps migration 029 (agency stri
 From the swarm repository, with Python 3.12+:
 
 ```powershell
-python -m pip install -r requirements-ops.txt
-python operations_server.py --host 127.0.0.1 --port 8787 --fleet 50 --seed 42 --frame-hz 10
+python -m pip install -r requirements/requirements-ops.txt
+python -m swarm_ops.server --host 127.0.0.1 --port 8787 --fleet 50 --seed 42 --frame-hz 10
+# the old command still works: python operations_server.py --port 8787 --fleet 50
 ```
 
 Alternatively use the existing launcher:
 
 ```powershell
-.\run-operations.ps1 -Fleet 50 -Port 8787 -Seed 42
+.\scripts\run-operations.ps1 -Fleet 50 -Port 8787 -Seed 42
 ```
 
 If the demo is already running on 8787, connect to it rather than starting another process on that port. Use a different port for an independent exercise.
@@ -713,7 +714,7 @@ This is a **reserved, explicitly enabled channel**, not the current running conn
 
 Decide the authority first: when connecting DisruptionOps for real integration, **DisruptionOps owns agency assignments, arrival and completion**. The simulator must not allocate those same ground resources independently. On the first successful import, the engine clears its local simulated ground resources and sets `external_ground:true`; local ground movement/allocation/automatic handoff stop. Aircraft decisions continue. Reset/scenario starts a fresh local exercise again; the adapter must re-establish run mappings.
 
-Before forwarding, validate the whole response using `integrations.disruptionops_bridge.validate_external_state(external_state, current_run_id)`. The raw WebSocket action does **not automatically call this stricter validator**. An integrating backend must apply it and keep the import token private.
+Before forwarding, validate the whole response using `swarm_ops.integrations.disruptionops_bridge.validate_external_state(external_state, current_run_id)`. The raw WebSocket action does **not automatically call this stricter validator**. An integrating backend must apply it and keep the import token private.
 
 Illustrative upstream object, with IDs/revision replaced from actual state:
 
@@ -742,7 +743,7 @@ Validation expects external `[longitude,latitude]` in `location`, or local three
 Forward the **validated** object as the command payload:
 
 ```python
-from integrations.disruptionops_bridge import validate_external_state
+from swarm_ops.integrations.disruptionops_bridge import validate_external_state
 
 payload = validate_external_state(external_state, state['run_id'])
 envelope = {
@@ -752,7 +753,7 @@ envelope = {
 }
 ```
 
-Do not blindly mark an incident resolved merely because supplies arrived. Imported resolution is authoritative and can close a local incident; establish what upstream “resolved” means. The proposed `/api/v1/drone/operations/events`, `/state` and `/handoff` endpoints belong to the **unapplied** adapter patch in this repository; they are not live endpoints of this server or the existing DisruptionOps deployment. Setting bridge environment flags alone does not wire that adapter into `operations_server.py`.
+Do not blindly mark an incident resolved merely because supplies arrived. Imported resolution is authoritative and can close a local incident; establish what upstream “resolved” means. The proposed `/api/v1/drone/operations/events`, `/state` and `/handoff` endpoints belong to the **unapplied** adapter patch in this repository; they are not live endpoints of this server or the existing DisruptionOps deployment. Setting bridge environment flags alone does not wire that adapter into `swarm_ops/server.py`.
 
 Read [disruptionops-integration.md](disruptionops-integration.md) for taxonomy mapping, durable outbox, proposed database migration and route changes. The older DisruptionOps drone feed and this schema are not plug-compatible. First build an explicit versioned adapter, test it independently, then review installation into the other project.
 
@@ -775,4 +776,4 @@ The supplied clients are additionally exercised against a real ephemeral localho
 python tests/operations_clients_acceptance.py
 ```
 
-Source of truth: [`operations_server.py`](../../operations_server.py), [`ops_simulation.py`](../../ops_simulation.py), [`integrations/disruptionops_bridge.py`](../../integrations/disruptionops_bridge.py). If a later implementation changes these contracts, update the version and this handoff together.
+Source of truth: [`swarm_ops/server.py`](../../swarm_ops/server.py), [`swarm_ops/engine.py`](../../swarm_ops/engine.py), [`swarm_ops/integrations/disruptionops_bridge.py`](../../swarm_ops/integrations/disruptionops_bridge.py). The viewer is served at `/` (files in `web/ops/`); the old `/web/operations.html` link still works. If a later implementation changes these contracts, update the version and this handoff together.

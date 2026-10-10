@@ -21,11 +21,11 @@ Sensing is ideal range/line-of-sight detection using simulator geometry, not cam
 
 In PowerShell from this folder:
 
-    powershell -ExecutionPolicy Bypass -File .\run-disaster.ps1
+    powershell -ExecutionPolicy Bypass -File .\scripts\legacy\run-disaster.ps1
 
 To demonstrate autonomous task recovery:
 
-    powershell -ExecutionPolicy Bypass -File .\run-disaster.ps1 -FailureDemo
+    powershell -ExecutionPolicy Bypass -File .\scripts\legacy\run-disaster.ps1 -FailureDemo
 
 The first task owner becomes unavailable for rescue work and returns under PID control. Another agent takes its task. This simulates mission-agent unavailability, not failed motors, a disabled flight controller or a drone crash.
 
@@ -33,6 +33,6 @@ Use -Overview to start with the full city visible, -Scripted for the previous ce
 
 ## Inspect decisions
 
-agentic-events.json records discoveries, ownership changes, unavailability, detours, releases and landings. disaster-live-status.json contains live agent states, battery estimates, coverage, messages and replans. disaster-validation.json contains the latest headless physics metrics, including contacts and minimum separation. Run `.conda-drones\python.exe -m unittest test_agentic_swarm -v` to check message latency, ownership recovery, frontier memory and detour/low-battery decisions.
+Result files are written to `legacy/pybullet/results/`. agentic-events.json records discoveries, ownership changes, unavailability, detours, releases and landings. disaster-live-status.json contains live agent states, battery estimates, coverage, messages and replans. disaster-validation.json contains the latest headless physics metrics, including contacts and minimum separation. Run `.conda-drones\python.exe -m unittest tests.legacy.test_agentic_swarm -v` from the repository root to check message latency, ownership recovery, frontier memory and detour/low-battery decisions.
 
 Final validation: normal and availability-recovery runs both completed all three deliveries and returned all 12 drones. Minimum drone separation was 0.382 m; unsafe contact steps were zero. Expected rescue-pad contact steps were 51 in normal mode and 70 in recovery mode. Drone 3's task transferred to Drone 1 after 0.52 simulated seconds. See agentic-normal-validation.json, agentic-failure-validation.json and agentic-failure-events.json. All four agent logic tests also passed.

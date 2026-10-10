@@ -1,6 +1,6 @@
 # Capabilities: what the system does and does not do
 
-Written 2026-10-10 from the code in `ops_simulation.py`, `operations_server.py`, the tests, and `docs/implementation/validation.md` and `HANDLED-CASES.md`. Phase 1 fixes (UI and engine) were still being made by other agents when this was written, so lines marked *in progress* describe intent, not verified behaviour.
+Written 2026-10-10 from the code in `ops_simulation.py`, `operations_server.py` (now `swarm_ops/engine.py`, `swarm_ops/server.py`), the tests, and `docs/implementation/validation.md` and `HANDLED-CASES.md`. Phase 1 fixes (UI and engine) were still being made by other agents when this was written, so lines marked *in progress* describe intent, not verified behaviour.
 
 ## 1. The honest summary
 
