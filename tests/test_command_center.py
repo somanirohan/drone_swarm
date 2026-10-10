@@ -113,5 +113,38 @@ class RealAdapterTests(unittest.TestCase):
         self.assertTrue(result['dry_run'])
 
 
+class SituationAndCatalogTests(unittest.TestCase):
+    def test_pawana_tasks_carry_disruptionops_situation_within_message_limit(self):
+        from swarm_ops.command_center import load_scenario
+        tasks = load_scenario('pccoe_pawana_night')
+        if not any(t.get('situation', {}).get('source', '').endswith('pccoe_pawana_night') for t in tasks):
+            self.skipTest('pccoe_pawana_night scenario not registered in this checkout')
+        for task in tasks:
+            situation = task['situation']
+            self.assertTrue(situation['report_text'])
+            self.assertIn('disruptionops_category', situation)
+            self.assertLessEqual(len(situation['nearby_lifelines']), 3)
+            self.assertLess(len(json.dumps({'payload': task})), 8000)  # server accepts 16 KiB per message
+        elderly = [t for t in tasks if 'elderly' in t['situation'].get('vulnerable', [])]
+        self.assertTrue(elderly, 'the elderly couple report must be flagged from its text')
+
+    def test_nearest_matching_catalog_unit_is_committed(self):
+        from swarm_ops.command_center import load_catalog
+        catalog = load_catalog()
+        if not catalog.get('resources'):
+            self.skipTest('no agency catalog')
+        center = CommandCenter('ws://x', 't', [], mode='orchestrator', log=lambda s: None)
+        center.depots = []
+        fire = [r for r in catalog['resources'] if r['kind'] == 'fire_engine' and r.get('local_xy')]
+        target = fire[0]['local_xy']
+        unit = center._commit_unit({'needed_kind': 'fire_engine', 'request_id': 'X-RR1', 'position': [*target, 0]},
+                                   {'id': 'I001', 'position': [*target, 0]})
+        self.assertTrue(unit['from_catalog'])
+        self.assertEqual(unit['id'], fire[0]['source_id'])  # a station at the incident is the nearest
+        second = center._commit_unit({'needed_kind': 'fire_engine', 'request_id': 'X-RR2', 'position': [*target, 0]},
+                                     {'id': 'I001', 'position': [*target, 0]})
+        self.assertNotEqual(second['id'], unit['id'])  # a committed unit is not committed twice
+
+
 if __name__ == '__main__':
     unittest.main()

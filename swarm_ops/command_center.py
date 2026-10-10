@@ -44,6 +44,45 @@ def _dist(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+
+# ----------------------------------------------------------------------------- DisruptionOps-derived data
+CATALOG_PATH = Path(__file__).resolve().parents[1] / "assets" / "operations" / "agency-catalog.json"
+# Unit kind aliases: DisruptionOps catalog kind -> kinds the swarm may ask for (engine CATALOG_KINDS and scenarios.pcmc.UNIT_KINDS).
+KIND_ALIASES = {"rescue_team": {"rescue_team", "rescue"}, "boat": {"boat", "rescue"}, "jcb": {"jcb", "engineering"}}
+_HAZARD_WORDS = (("water", "flood"), ("pawana", "river_overflow"), ("river", "river_overflow"), ("gas", "toxic_gas"), ("smoke", "smoke"), ("fire", "fire"), ("wire", "live_wire"),
+                 ("spark", "live_wire"), ("wall", "structural_collapse"), ("collapsed", "structural_collapse"), ("tree", "road_blocked"), ("underpass", "flooded_road"))
+_VULNERABLE_WORDS = (("elderly", "elderly"), ("old ", "elderly"), ("child", "children"), ("kid", "children"), ("baby", "infants"), ("pregnan", "pregnant"), ("disabled", "disabled"))
+
+
+def load_catalog(path=CATALOG_PATH):
+    """DisruptionOps migration 029 units and lifelines (assets/operations/agency-catalog.json); empty if missing."""
+    try:
+        return json.loads(Path(path).read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {"resources": [], "lifelines": [], "wards": []}
+
+
+def situation_for(task, incident=None, catalog=None, report_text=None):
+    """Rich situation block for an agency_request, taken from the DisruptionOps-derived data on the incident
+    (its report text, DO category, ward, caller count) and the catalog (nearest lifelines). Facts the source
+    does not state are left out, never invented: vulnerable groups and hazards are read from the report text."""
+    catalog = catalog if catalog is not None else load_catalog()
+    incident = incident or {}
+    text = report_text or incident.get("title") or task.get("title") or ""
+    low = text.lower() + " "
+    position = task["position"]
+    lifelines = sorted(({"id": l["source_id"], "kind": l["kind"], "name": l["name"], "distance_m": round(_dist(position, l["local_xy"]))}
+                        for l in catalog.get("lifelines", []) if l.get("local_xy")), key=lambda l: l["distance_m"])[:3]
+    situation = {"report_text": text[:240], "disruptionops_category": incident.get("disruptionops_category"), "category": task.get("category"),
+                 "people": task.get("people"), "crowd_size": task.get("people"), "reporters": incident.get("callers"),
+                 "ward": {"id": incident.get("ward_id"), "name": incident.get("named_ward"), "place": incident.get("place")} if incident.get("ward_id") else None,
+                 "vulnerable": sorted({label for word, label in _VULNERABLE_WORDS if word in low}),
+                 "injured_reported": any(w in low for w in ("injur", "trapped", "coughing", "unconscious")),
+                 "hazards": sorted({label for word, label in _HAZARD_WORDS if word in low}),
+                 "nearby_lifelines": lifelines, "severity": task.get("priority"), "needs": task.get("needs"),
+                 "source": "disruptionops:" + ("scenarios.pccoe_pawana_night" if incident.get("hotspot_id") else "catalog+engine template")}
+    return {k: v for k, v in situation.items() if v not in (None, [], "")}
+
 # ----------------------------------------------------------------------------- scenarios
 def load_scenario(name_or_path, *, seed=7, count=5):
     """Return a list of task dicts. Sources, in order: JSON file, engine scenario incidents, random points."""
@@ -53,9 +92,18 @@ def load_scenario(name_or_path, *, seed=7, count=5):
         return [_normalise(t, i) for i, t in enumerate(tasks)]
     try:
         from swarm_ops.engine import OperationsSimulation
+        try:
+            import swarm_ops.scenarios  # noqa: F401 - registers the PCMC region scenarios when present
+        except ImportError:
+            pass
         sim = OperationsSimulation(seed=seed, scenario=str(name_or_path))
-        tasks = [{"kind": "sos", "position": i["position"], "category": i["category"], "people": i["people"],
-                  "needs": i["needs"], "priority": i["severity"], "title": i["title"]} for i in sim.incidents]
+        catalog = load_catalog()
+        tasks = []
+        for i in sim.incidents:
+            task = {"kind": "sos", "position": i["position"], "category": i["category"], "people": i["people"],
+                    "needs": i["needs"], "priority": i["severity"], "title": i["title"]}
+            task["situation"] = situation_for(task, i, catalog)
+            tasks.append(task)
         if tasks:
             return [_normalise(t, n, delay=3.0 * n) for n, t in enumerate(tasks)]
     except Exception:  # noqa: BLE001 - scenario not available in this checkout: fall back to random points
@@ -66,6 +114,7 @@ def load_scenario(name_or_path, *, seed=7, count=5):
 def random_scenario(*, seed=7, count=5):
     from swarm_ops.engine import OperationsSimulation
     sim = OperationsSimulation(seed=seed)
+    catalog = load_catalog()
     r = random.Random(f"command-center:{seed}")
     kinds = ["sos", "sos", "sos", "assess", "supply", "sos", "overwatch"]
     cats = ["medical", "flood", "fire", "trapped", "medical"]
@@ -76,9 +125,10 @@ def random_scenario(*, seed=7, count=5):
         if position is None:
             continue
         title, severity, (low, high), needs, _required = sim.INCIDENT_TEMPLATES[category]
-        tasks.append(_normalise({"kind": kinds[n % len(kinds)], "position": position, "category": category,
-                                 "people": r.randint(low, high), "needs": needs, "priority": severity, "title": title},
-                                n, delay=2.5 * n))
+        task = {"kind": kinds[n % len(kinds)], "position": position, "category": category,
+                "people": r.randint(low, high), "needs": needs, "priority": severity, "title": title}
+        task["situation"] = situation_for(task, None, catalog)
+        tasks.append(_normalise(task, n, delay=2.5 * n))
     return tasks
 
 
@@ -217,7 +267,7 @@ class CommandCenter:
         request_id = f"cc-{self.scenario}-{self.run_prefix}-{slot + 1:02d}"
         payload = {"request_id": request_id, "kind": task["kind"], "position": task["position"], "category": task.get("category", "medical"),
                    "people": task.get("people", 1), "needs": task.get("needs") or None, "priority": task.get("priority", 3),
-                   "requested_by": "command-center", "sim_run_id": self.run_id}
+                   "requested_by": "command-center", "sim_run_id": self.run_id, "situation": task.get("situation")}
         payload = {k: v for k, v in payload.items() if v is not None}
         record = self.tasks.setdefault(request_id, {"request_id": request_id, "task": task, "status": "requested", "incident_id": None,
                                                     "accepted": None, "history": [], "attempts": 0})
@@ -263,18 +313,39 @@ class CommandCenter:
                 pending.extend(units)
         return pending
 
+    def _unit_pool(self):
+        """Candidate ground units: the DisruptionOps catalog (positions from the swarm's own snapshot when it places them),
+        plus any other available resource the swarm lists."""
+        if not hasattr(self, "_catalog_units"):
+            self._catalog_units = load_catalog().get("resources", [])
+        live = {d["id"]: d for d in self.depots}
+        pool, seen = [], set()
+        for c in self._catalog_units:
+            depot = live.get(c["source_id"])
+            position = (depot or {}).get("position") or c.get("local_xy")
+            if position:
+                pool.append({"id": c["source_id"], "kinds": {c["kind"]} | KIND_ALIASES.get(c["kind"], set()) | ({depot["kind"]} if depot else set()),
+                             "position": list(position)[:2] + [0], "name": c.get("name"), "operator": c.get("operator"), "capacity": c.get("capacity")})
+                seen.add(c["source_id"])
+        pool += [{"id": d["id"], "kinds": {d["kind"]}, "position": list(d["position"])[:2] + [0], "name": d.get("name"), "operator": d.get("agency"),
+                  "capacity": d.get("capacity")} for d in self.depots if d["id"] not in seen]
+        return pool
+
     def _commit_unit(self, rr, incident):
+        """Nearest free catalog unit whose kind matches the request; a labelled synthetic unit only if none is free."""
         kind = rr["needed_kind"]
-        taken = {u["depot_id"] for u in self.units.values()}
-        candidates = sorted((d for d in self.depots if d.get("kind") == kind and d["id"] not in taken), key=lambda d: _dist(d["position"], rr["position"]))
+        taken = {u["depot_id"] for u in self.units.values() if u["state"] not in ("released", "service_done")}
+        candidates = sorted((p for p in self._unit_pool() if kind in p["kinds"] and p["id"] not in taken),
+                            key=lambda p: (_dist(p["position"], rr["position"]), p["id"]))
         if candidates:
-            depot = candidates[0]
-            unit = {"id": f"DO-{depot['id']}", "depot_id": depot["id"], "position": list(depot["position"])[:2] + [0]}
-        else:  # no matching depot known: the command center fields a unit from the map origin
+            pick = candidates[0]
+            unit = {"id": pick["id"], "depot_id": pick["id"], "position": pick["position"], "name": pick["name"], "operator": pick["operator"],
+                    "from_catalog": True, "distance_at_commit_m": round(_dist(pick["position"], rr["position"])), "capacity": pick["capacity"] or 1}
+        else:
             n = sum(u["kind"] == kind for u in self.units.values()) + 1
-            unit = {"id": f"DO-{kind}-{n}", "depot_id": f"synthetic-{kind}-{n}", "position": [0.0, 0.0, 0.0]}
-        unit.update(kind=kind, incident_id=incident["id"], target=list(incident["position"]), state="en_route", rr=rr["request_id"], dispatched_sim_t=self.sim_t,
-                    capacity=1 if kind != "rescue" else 4, handoff_sent=False)
+            unit = {"id": f"DO-{kind}-{n}", "depot_id": f"synthetic-{kind}-{n}", "position": [0.0, 0.0, 0.0], "from_catalog": False, "capacity": 1}
+        unit.update(kind=kind, incident_id=incident["id"], target=list(incident["position"]), state="en_route", rr=rr["request_id"],
+                    dispatched_sim_t=self.sim_t, handoff_sent=False)
         self.units[unit["id"]] = unit
         return unit
 

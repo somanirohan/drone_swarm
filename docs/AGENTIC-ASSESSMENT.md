@@ -100,3 +100,13 @@ It is a **deterministic multi-agent simulation with an agency-shaped interface**
 | Agent memory | Scoped, ledgered, used in decisions | None |
 | Guardrails | Layered, tripped and logged | Input validation only |
 | Agent boundary | Internal state keys | Public WS protocol with accept/decline and statuses |
+
+## 4. Design update: LLM planner with guardrails (swarm)
+
+Decided 2026-10-10 with the reasoner work (`swarm_ops/reasoning`, owned by the ENGINE/INTEGRATION side). Sections 2 and 3 above describe the engine before this change.
+
+- **Swarm decisions = LLM planner + guardrails.** The reasoner reads the rich situation the command center now sends with every `agency_request` and decides what to launch and which agencies to request. Guardrails stay deterministic and veto: bounds, no-fly zones, energy-feasible route, open-incident and launch caps, schema validation of the model output, and the existing accept/decline reasons.
+- **Deterministic mapping only as a labelled fallback.** If no model is reachable or its output fails validation, the old rule-based path decides and the decision trace says `fallback`. This is the same pattern DisruptionOps uses (`agents/llm.py` chain ending in a deterministic fallback), applied to the swarm; unlike DO's graph, the model here chooses actions, not only prose, so the guardrail layer carries more weight.
+- **Command center input.** `swarm_ops/command_center.py` sends `payload.situation` taken from DisruptionOps data (the `pccoe_pawana_night` reports and migration 029/030 catalog): report text, DisruptionOps category id, ward and place, people and reporter count, `crowd_size`, `vulnerable` groups, `injured_reported`, `hazards` and the three nearest lifelines. Vulnerable groups, injuries and hazards are read from the report text only; if the source does not say it, the field is left out. A unit test checks the elderly-couple report is flagged.
+- **Answering resource requests.** In orchestrator mode the command center commits the nearest free unit of the matching kind from `assets/operations/agency-catalog.json` (the swarm's own snapshot position wins when it places that unit), never twice, and falls back to a labelled synthetic unit only when none is free. No unit ids or kinds are hard-coded.
+- **Still true:** the command center itself is deterministic (no LLM). Making the DisruptionOps role agentic would mean the Commander-style tool loop from section 1.2 choosing tasks and units; today it replays a scenario script.
