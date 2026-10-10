@@ -21,6 +21,7 @@ from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from swarm_ops.telemetry import Telemetry, setup_logging
 from websockets.asyncio.server import serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
@@ -75,6 +76,17 @@ class OperationsServer:
         self._tick_task = None
         self.bridge = None
         self._bridge_task = None
+        # Run recorder + audit logs. Tests that pass journal_path keep their data beside it.
+        runs_dir = (Path(journal_path).parent / 'runs') if journal_path else ROOT / '.cache' / 'runs'
+        self.telemetry = Telemetry(runs_dir, secrets=(self.control_token, self.integration_token))
+
+    def _role(self, request, params=None):
+        token = request.headers.get('Authorization', '')[7:] if request.headers.get('Authorization', '').startswith('Bearer ') else (params or {}).get('token', [''])[0]
+        if token and secrets.compare_digest(token.encode(), self.control_token.encode()):
+            return 'operator'
+        if token and self.integration_token and secrets.compare_digest(token.encode(), self.integration_token.encode()):
+            return 'integration'
+        return 'view'
 
     def _json(self, status, data):
         return self._response(status, json.dumps(data, separators=(',', ':')).encode(), 'application/json', cache=False)
@@ -101,6 +113,18 @@ class OperationsServer:
     def http(self, connection, request):
         url = urlsplit(request.path)
         path = unquote(url.path)
+        if path == '/ops/runs' or path.startswith('/ops/runs/') or path == '/ops/telemetry':
+            query = parse_qs(url.query)
+            role = self._role(request, query)
+            self.telemetry.connection('http.request', role, connection.remote_address, path=path)
+            if role == 'view':
+                return self._json(HTTPStatus.FORBIDDEN, {'error': 'Operator or integration token required for run datasets.'})
+            if path == '/ops/telemetry':
+                return self._json(HTTPStatus.OK, self.telemetry.stats())
+            status, body, kind = self.telemetry.handle(path, query)
+            if kind == 'json':
+                return self._json(HTTPStatus(status), body)
+            return self._response(HTTPStatus(status), body, kind)
         if path == '/ops/ws':
             origin = request.headers.get('Origin')
             if origin and urlsplit(origin).netloc.lower() != request.headers.get('Host', '').lower():
@@ -126,10 +150,6 @@ class OperationsServer:
                 return self._json(HTTPStatus.BAD_REQUEST, {'error': 'after and limit must be integers'})
             events = self.journal.replay(after, limit)
             return self._json(HTTPStatus.OK, {'events': events, 'next_cursor': events[-1]['cursor'] if events else after})
-        if path in ('/', '/index.html', '/operations'):
-            path = '/web/ops/operations.html'
-        if path == '/legacy':
-            path = '/web/legacy/index.html'
         if path == '/ops/messages':
             # Command-center <-> agent message log (engine `messages`); paged by message id: ?after=<id>&limit=<n>.
             params = parse_qs(url.query)
@@ -147,6 +167,10 @@ class OperationsServer:
             page = list(messages[:limit])
             return self._json(HTTPStatus.OK, {'run_id': self.engine.run_id, 'messages': page, 'next_after': page[-1].get('id') if page else after,
                                               'available': hasattr(self.engine, 'messages') or 'messages' in self.engine.snapshot(include_world=False)})
+        if path in ('/', '/index.html', '/operations'):
+            path = '/web/ops/operations.html'
+        if path == '/legacy':
+            path = '/web/legacy/index.html'
         # Old URLs from before the web/ops + web/legacy split; already-shared links keep working.
         path = OLD_WEB_PATHS.get(path, path)
         prefix, _, tail = path.lstrip('/').partition('/')
@@ -176,6 +200,8 @@ class OperationsServer:
         token = params.get('token', [''])[0]
         can_control = bool(token and secrets.compare_digest(token.encode(), self.control_token.encode()))
         can_integrate = bool(self.integration_token and token and secrets.compare_digest(token.encode(), self.integration_token.encode()))
+        role = 'operator' if can_control else 'integration' if can_integrate else 'view'
+        self.telemetry.connection('ws.connect', role, ws.remote_address)
         state = self.engine.snapshot()
         queue = asyncio.Queue(maxsize=2)
         self.clients[ws] = {'queue': queue, 'run_id': state['run_id']}
@@ -208,11 +234,25 @@ class OperationsServer:
             pass
         finally:
             self.clients.pop(ws, None)
+            self.telemetry.connection('ws.disconnect', role, ws.remote_address)
             sender.cancel()
             with contextlib.suppress(asyncio.CancelledError, ConnectionClosed):
                 await sender
 
     def apply_command(self, raw, *, can_control=False, can_integrate=False):
+        started = time.perf_counter()
+        ack = self._apply_command(raw, can_control=can_control, can_integrate=can_integrate)
+        try:
+            message = json.loads(raw)
+            message = message if isinstance(message, dict) else {}
+        except (TypeError, ValueError):
+            message = {}
+        role = 'operator' if can_control else 'integration' if can_integrate else 'view'
+        self.telemetry.audit(str(message.get('action')), role, message.get('payload'), ack.get('ok'), ack.get('error'),
+                             (time.perf_counter() - started) * 1000, message.get('id'), ack.get('incident_id'))
+        return ack
+
+    def _apply_command(self, raw, *, can_control=False, can_integrate=False):
         try:
             message = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(ValueError('Non-finite JSON number')))
         except (TypeError, ValueError):
@@ -261,6 +301,7 @@ class OperationsServer:
             dt = min(.25, max(0, started - last))
             last = started
             self.engine.step(dt)
+            self._step_ms = (time.monotonic() - started) * 1000
             if started >= next_frame:
                 next_frame = started + 1 / self.frame_hz
                 self.seq += 1
@@ -274,6 +315,7 @@ class OperationsServer:
                 if unseen:
                     self.journal.append(state['run_id'], unseen)
                     self._journal_seen = {str(e['id']) for e in state.get('events', [])}
+                self.telemetry.observe(state, self.engine)
                 regular_packet = self._packet(state) if self.clients else None
                 world_packet = None
                 for ws, client in list(self.clients.items()):
@@ -307,6 +349,7 @@ class OperationsServer:
             self._listener.close()
             await self._listener.wait_closed()
         self.journal.close()
+        self.telemetry.close()
 
 
 async def main_async(args):
@@ -316,6 +359,7 @@ async def main_async(args):
     world = json.loads(world_path.read_text(encoding='utf8')) if world_path.exists() else None
     # --world pcmc-region starts on a PCMC scenario; built-in scenarios keep the Pune district world.
     scenario = args.scenario or ('pccoe_pawana_night' if args.world == 'pcmc-region' else 'rooftop_flood')
+    setup_logging()
     engine = OperationsSimulation(world=world, seed=args.seed, fleet_size=args.fleet, scenario=scenario)
     server = OperationsServer(engine, host=args.host, port=args.port, frame_hz=args.frame_hz,
                               control_token=os.environ.get('OPS_CONTROL_TOKEN'))
