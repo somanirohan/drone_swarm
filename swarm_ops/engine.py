@@ -42,6 +42,8 @@ import random
 import uuid
 from pathlib import Path
 
+from swarm_ops.planning import FlightPlanner
+
 
 ANCHOR = [18.6526632, 73.7624378]
 SCENARIOS = {
@@ -54,10 +56,13 @@ SCENARIOS = {
 DOCK_DISPATCH_CAP = 3
 # Communication pulses are kept this many simulated seconds in snapshots.
 SIGNAL_WINDOW = 6.0
+# Incident hover point is this far from the target, on the approach side (no overflight, no circling).
+STANDOFF_M = 20.0
 # A docked fleet does not relaunch for an already-assessed incident sooner than this.
 RELAUNCH_COOLDOWN = 20.0
 # Supplies a ground unit carries (illustrative); used to name who holds a missing item.
-GROUND_SUPPLIES = {"ambulance": ("first_aid", "medical"), "rescue": ("food", "first_aid"), "fire_engine": ("first_aid",)}
+GROUND_SUPPLIES = {"ambulance": ("first_aid", "medical"), "rescue": ("food", "first_aid"), "fire_engine": ("first_aid",),
+                   "boat": ("food", "first_aid"), "supply_truck": ("food", "first_aid"), "bus": ("food",)}
 SUPPLY_ITEMS = ("first_aid", "medical", "food")
 ACTIVITIES = ("docked", "launching", "transit", "scanning", "assessing", "delivering", "returning", "charging", "holding", "failed")
 SENSOR_HALF_ANGLE = math.radians(30)
@@ -69,7 +74,7 @@ ORCHESTRATOR_STATUS = {"request_accepted": "accepted", "request_declined": "decl
     "resource_request_fulfilled": "resource_assigned", "supply": "supply_delivered", "ground_arrival": "ground_arrived",
     "drone_recall": "recalled", "drone_retask": "retasked", "handoff": "handed_over", "resolved": "completed"}
 REQUEST_KINDS = ("sos", "assess", "supply", "overwatch")
-TRANSPORT_KINDS = ("ambulance", "rescue")
+TRANSPORT_KINDS = ("ambulance", "rescue", "boat", "bus")
 BEHAVIORS = ("search", "confirm", "assess", "relay", "return", "charge", "idle", "hold", "failed")
 PERSON_STATUSES = ("waiting", "supplied", "assessed", "being_rescued", "evacuated", "hospitalised")
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "assets" / "operations" / "agency-catalog.json"
@@ -80,7 +85,8 @@ _FALLBACK_CATALOG = {"resources": [
     {"source_id": "PC-TEAM-02", "kind": "rescue_team", "name": "SDRF team 02 (Nigdi)", "operator": "SDRF Maharashtra", "capacity": 20, "local_xy": [978.1, 722.8], "on_map": False}],
     "lifelines": [{"source_id": "lf-pc-h5", "kind": "hospital", "name": "Global Hospital, Ravet", "local_xy": [-557.3, -685.9], "on_map": False}]}
 # DisruptionOps catalog kind -> simulator resource kind.
-CATALOG_KINDS = {"fire_engine": "fire_engine", "ambulance": "ambulance", "rescue_team": "rescue", "boat": "rescue", "jcb": "engineering"}
+CATALOG_KINDS = {"fire_engine": "fire_engine", "ambulance": "ambulance", "rescue_team": "rescue", "boat": "rescue", "jcb": "engineering",
+                 "pump": "pump", "water_tanker": "water_tanker", "supply_truck": "supply_truck", "bus": "bus"}
 GROUND_SPEED = 9.0
 # Simulator resource kinds (DisruptionOps capability names; rescue_team -> rescue, jcb -> engineering).
 # transport: road|boat; model: hint for the 3D viewer; carries_people: loads and transfers people.
@@ -99,6 +105,10 @@ RESOURCE_ALIASES = {"rescue_team": "rescue", "jcb": "engineering"}
 # A required kind may also be served by these kinds (exact kind preferred).
 KIND_SUBSTITUTES = {"rescue": ("boat",), "boat": ("rescue",), "supply_truck": ("water_tanker",), "water_tanker": ("supply_truck",)}
 CATEGORY_ALIASES = {}
+HAZARDS = {"flood": ["flood water"], "fire": ["fire", "smoke"], "trapped": ["smoke", "restricted access"],
+           "person_stranded": ["flood water"], "flooded_road": ["standing water"], "waterlogging": ["standing water"],
+           "fallen_tree": ["blocked road", "debris"], "structural_damage": ["collapse", "debris"], "air_quality": ["smoke", "gas"],
+           "evacuation": ["crowding"], "shelter_full": ["crowding"], "supply_shortage": ["shortage"]}
 _ROAD_CACHE = {}
 DEFAULT_WORLD_ID = "pune-district"
 # id -> {"id","name","description","builder","world_id"}; built-ins have builder None (engine-internal).
@@ -144,6 +154,16 @@ WORLD_REGISTRY[DEFAULT_WORLD_ID] = lambda: json.loads(PUNE_WORLD_PATH.read_text(
 def scenario_catalog():
     """[{id, name, description, world_id}] for every registered scenario (for UIs/servers)."""
     return [{k: v for k, v in spec.items() if k != "builder"} for spec in SCENARIO_REGISTRY.values()]
+
+
+def _serves(resource, kind):
+    """True when a resource can fill a required kind (exact kind or an accepted substitute)."""
+    own = resource.get("kind")
+    return own == kind or own in KIND_SUBSTITUTES.get(kind, ())
+
+
+def _carries_people(resource):
+    return resource.get("transport") == "boat" or RESOURCE_KINDS.get(resource.get("kind"), {}).get("carries_people", False)
 
 
 def _agency_catalog():
@@ -206,7 +226,7 @@ class OperationsSimulation:
     """JSON snapshots and commands for a local, single-authority demo server."""
 
     # Per-world caches dropped when a different world is loaded.
-    _WORLD_CACHES = ("_buildings_cache", "_road_base", "_flight_grid_cache", "_search_prior_cache", "_person_positions",
+    _WORLD_CACHES = ("_buildings_cache", "_road_base", "_search_prior_cache", "_person_positions",
                      "_connector_cache", "_ground_cache", "_planner", "_edge_index", "_building_grid")
 
     def __init__(self, world=None, seed=42, fleet_size=20, scenario="rooftop_flood"):
@@ -261,6 +281,7 @@ class OperationsSimulation:
         self._base = (self._base + [0,0,0])[:3]
         self.scenario = {"id": scenario, "name": spec["name"], "description": spec["description"], "seed": self.seed, "world_id": self.world_id}
         self.docks = []
+        self.dispatch_cap = None  # builders may set {"per_incident": n, "total": m}
         self.drones = []
         for i in range(self.fleet_size):
             self.drones.append({"id": f"D{i+1:02}", "position": [self._base[0]+(i%5)*5,self._base[1]+(i//5)*5,0],
@@ -287,7 +308,7 @@ class OperationsSimulation:
                 link=self._road_connector(resource["position"])
                 if link:resource["position"]=[round(link[3][0],2),round(link[3][1],2),0]
         self._create_scenario(scenario)
-        if self.docks:self._event("scenario", f"{self.scenario['name']} started; {self.fleet_size} drones docked at {len(self.docks)} stations, launch cap {DOCK_DISPATCH_CAP}.")
+        if self.docks:self._event("scenario", f"{self.scenario['name']} started; {self.fleet_size} drones docked at {len(self.docks)} stations, launch cap {self._cap_total()}.")
         else:self._event("scenario", f"{self.scenario['name']} started; {self.fleet_size} drones ready.")
         self._allocate()
 
@@ -360,7 +381,7 @@ class OperationsSimulation:
 
     def nearest_road_point(self,xy,max_distance=150.0):
         """Closest point on an open (dry, unblocked) road within max_distance, as [x,y,0], else None."""
-        link=self._road_connector([float(xy[0]),float(xy[1]),0])
+        link=self._road_connector([float(xy[0]),float(xy[1]),0],max(150.0,float(max_distance)))
         if link is None or link[0]>max_distance:return None
         return [round(link[3][0],2),round(link[3][1],2),0.0]
 
@@ -379,8 +400,7 @@ class OperationsSimulation:
 
     def add_incident(self,position,category,title=None,severity=None,people=None,needs=None,required=None,source="scenario",building_id=None):
         """Create (or merge into) an incident. Unspecified fields come from INCIDENT_TEMPLATES[category]."""
-        category=CATEGORY_ALIASES.get(category,category)
-        if category not in self.INCIDENT_TEMPLATES:raise ValueError(f"Unknown incident category '{category}'")
+        category=self._category(category)
         t_title,t_severity,(low,high),t_needs,t_required=self.INCIDENT_TEMPLATES[category]
         people=self.rng.randint(low,high) if people is None else int(people)
         position=[float(v) for v in (list(position)+[0.0])[:3]]
@@ -397,9 +417,10 @@ class OperationsSimulation:
     def add_resource(self,kind,position,name=None,id=None,agency=None,capacity=None,transport=None,state="available",**extra):
         """Add a ground (or boat) responder of any RESOURCE_KINDS kind at position."""
         kind=RESOURCE_ALIASES.get(kind,kind)
-        if kind not in RESOURCE_KINDS:raise ValueError(f"Unknown resource kind '{kind}'")
+        if not isinstance(kind,str) or not kind:raise ValueError("resource kind is required")
         if position is None:raise ValueError("resource position is required")
-        spec=RESOURCE_KINDS[kind]
+        # Unknown kinds (e.g. police) are kept and shown, but only dispatched when a plan requires that kind.
+        spec=RESOURCE_KINDS.get(kind,{"transport":"road","agency":kind.replace("_"," ").title(),"capacity":1,"model":kind,"carries_people":False})
         transport=transport or spec["transport"]
         identifier=id or f"R{len(self.resources)+1:02}"
         resource={"id":identifier,"kind":kind,"name":name or identifier,"agency":agency or spec["agency"],"state":state,
@@ -414,7 +435,7 @@ class OperationsSimulation:
     def _ensure_ground_kinds(self,required):
         """Mutual aid: if the scenario has no unit of a required kind, bring in the real PCMC units of that kind."""
         if self.external_ground:return
-        missing=[k for k in required if not any(r["kind"]==k for r in self.resources)]
+        missing=[k for k in required if not any(_serves(r,k) for r in self.resources)]
         catalog_kinds=tuple(ck for ck,k in CATALOG_KINDS.items() if k in missing and ck!="boat")
         if not catalog_kinds:return
         before=len(self.resources)
@@ -499,6 +520,15 @@ class OperationsSimulation:
         self._incident(sites[0],"fire","Building fire; occupants on upper floors",5,self.rng.randint(3,8),["assessment"],["fire_engine"],source="sos")
         self._incident(sites[1],"medical","Smoke-inhalation casualty needs first aid",4,self.rng.randint(1,2),["first_aid","medical"],["ambulance"],source="sos")
         if count==3:self._incident(sites[2],"trapped","Residents sheltering in adjacent building",3,self.rng.randint(4,9),["food"],["rescue"],source="sos")
+
+    def _cap_total(self):
+        """Most aircraft airborne at once on a docked fleet (scenario builders may set sim.dispatch_cap)."""
+        cap=getattr(self,"dispatch_cap",None)
+        return int(cap.get("total",DOCK_DISPATCH_CAP)) if isinstance(cap,dict) else DOCK_DISPATCH_CAP
+
+    def _cap_per_incident(self):
+        cap=getattr(self,"dispatch_cap",None)
+        return int(cap.get("per_incident",DOCK_DISPATCH_CAP)) if isinstance(cap,dict) else DOCK_DISPATCH_CAP
 
     def _launched(self):
         return sum(1 for d in self.drones if d.get("dock_id") and d["state"] in ("enroute","observing","returning","holding"))
@@ -661,11 +691,22 @@ class OperationsSimulation:
             projections.append((_distance(position[:2],point),point,index,fraction))
         return min(projections,key=lambda p:p[0]) if projections else None
 
+    def _flood_zones(self):
+        return [z for z in self.world.get("flood_zones",[]) if isinstance(z,dict) and "center" in z]
+
     def _submerged(self,position):
+        if not self.flood["enabled"]:return False
+        zones=self._flood_zones()
+        if zones:
+            # Localised flooding (region worlds): only inside the named flood zones.
+            return any((position[0]-z["center"][0])**2+(position[1]-z["center"][1])**2<float(z.get("radius",300))**2 for z in zones)
         projection=self._river_projection(position)
-        return bool(self.flood["enabled"] and projection and projection[0]<self.flood["width"]/2)
+        return bool(projection and projection[0]<self.flood["width"]/2)
 
     def _elevated_crossing(self,position):
+        if self.world.get("river_crossings"):
+            # Real bridges: the deck stays usable over flood water.
+            return any(_distance(position[:2],point)<60 for point in self._safe_crossings)
         # Two explicitly synthetic elevated crossing corridors keep a dry
         # network possible without treating every submerged road as passable.
         river=self.world.get("river",[])
@@ -677,10 +718,23 @@ class OperationsSimulation:
     def _apply_flood_roads(self):
         river=self.world.get("river",[])
         self._safe_crossings=[]
-        if len(river)>1:
+        crossings=[c.get("position") for c in self.world.get("river_crossings",[]) if isinstance(c,dict) and c.get("position")]
+        if crossings:
+            self._safe_crossings=[list(p[:2]) for p in crossings]
+        elif len(river)>1:
             self._safe_crossings=[river[max(0,len(river)//3)],river[min(len(river)-1,2*len(river)//3)]]
         self.flood["safe_crossings"]=copy.deepcopy(self._safe_crossings)
-        for a,b in (self._road_edges if len(river)>1 else ()):
+        zones=self._flood_zones()
+        if zones:
+            self.flood["zones"]=copy.deepcopy(zones);self.flood["model"]="localised flood zones; prescribed depth, not hydrodynamics"
+            # Only edges near a zone can be submerged.
+            candidates={}
+            for z in zones:
+                for edge in self._edges_near(z["center"][0],z["center"][1],float(z.get("radius",300))):candidates[edge]=None
+            edges=list(candidates)
+        else:
+            edges=self._road_edges if len(river)>1 else ()
+        for a,b in edges:
             count=max(2,int(_distance(a,b)/12))
             submerged=any(self._submerged(p) and not self._elevated_crossing(p) for p in ([a[0]+(b[0]-a[0])*i/count,a[1]+(b[1]-a[1])*i/count] for i in range(count+1)))
             if submerged:
@@ -691,7 +745,11 @@ class OperationsSimulation:
 
     def _water_path(self,start,end):
         origin=self._river_projection(start);target=self._river_projection(end)
-        if not origin or not target or origin[0]>self.flood["width"]/2+1 or target[0]>self.flood["width"]/2+1:return None
+        if not origin or not target:return None
+        corridor=self.flood["width"]/2+1
+        # A flood zone that reaches the river is navigable from the river to the incident.
+        if origin[0]>corridor and not self._submerged(start):return None
+        if target[0]>corridor and not (self._submerged(end) and self._submerged(target[1])):return None
         river=self.world["river"];first,last=origin[2]+origin[3],target[2]+target[3]
         points=[origin[1]]
         if first<=last:
@@ -703,7 +761,7 @@ class OperationsSimulation:
 
     def _resource_path(self,resource,incident):
         if resource.get("transport")=="boat":
-            if incident["category"]!="flood":return None
+            if incident["category"]!="flood" and not self._submerged(incident["position"]):return None
             return self._water_path(resource["position"],incident["position"])
         # Rooftop boat access is deliberately different from road access.
         if self._submerged(incident["position"]) and not self._elevated_crossing(incident["position"]):return None
@@ -726,6 +784,21 @@ class OperationsSimulation:
         self._blocked_edges=set();self._ground_cache={};self._connector_cache={}
 
     def _build_roads_uncached(self):
+        if (self.world.get("road_network") or {}).get("prebuilt"):
+            # Prebuilt network (OSM shared nodes): polyline end points are the junctions and
+            # consecutive points are edges. No intersection splitting, so flyovers stay unjoined.
+            self._road_graph={};self._road_edges=[];seen=set()
+            for road in self.world.get("roads",[]):
+                if road.get("blocked"):continue
+                points=[tuple(float(v) for v in p[:2]) for p in road.get("points",[])]
+                for x,y in zip(points,points[1:]):
+                    key=(x,y) if x<y else (y,x)
+                    if x==y or key in seen:continue
+                    seen.add(key);length=_distance(x,y)
+                    self._road_graph.setdefault(x,{})[y]=length;self._road_graph.setdefault(y,{})[x]=length
+                    self._road_edges.append((x,y))
+            self._blocked_edges=set();self._ground_cache={};self._connector_cache={}
+            return
         # Subdivide road polylines and split intersections, enabling true graph paths.
         segments=[]
         for road in self.world.get("roads",[]):
@@ -760,18 +833,43 @@ class OperationsSimulation:
                 self._road_graph.setdefault(y,{})[x]=_distance(x,y)
                 self._road_edges.append((x,y))
 
-    def _road_connector(self,position):
-        """Closest dry, unblocked road point within 150 m (cached per position and closure set)."""
+    EDGE_CELL=100.0
+
+    def _edge_grid(self):
+        """Spatial hash of road edges (100 m cells), built once per world."""
+        index=self.__dict__.get("_edge_index")
+        if index is None:
+            index={};s=self.EDGE_CELL
+            for number,edge in enumerate(self._road_edges):
+                (ax,ay),(bx,by)=edge
+                for ix in range(int(math.floor(min(ax,bx)/s)),int(math.floor(max(ax,bx)/s))+1):
+                    for iy in range(int(math.floor(min(ay,by)/s)),int(math.floor(max(ay,by)/s))+1):
+                        index.setdefault((ix,iy),[]).append(number)
+            self._edge_index=index
+        return index
+
+    def _edges_near(self,x,y,radius):
+        """Road edges whose bounding cells come within radius of (x,y), in road-edge-list order."""
+        index=self._edge_grid();s=self.EDGE_CELL;found=set()
+        for ix in range(int(math.floor((x-radius)/s)),int(math.floor((x+radius)/s))+1):
+            for iy in range(int(math.floor((y-radius)/s)),int(math.floor((y+radius)/s))+1):
+                found.update(index.get((ix,iy),()))
+        edges=self._road_edges
+        return [edges[n] for n in sorted(found)]
+
+    def _road_connector(self,position,max_distance=150.0):
+        """Closest dry, unblocked road point within max_distance (cached per position and closure set)."""
         cache=self.__dict__.setdefault("_connector_cache",{})
-        cache_key=(float(position[0]),float(position[1]),len(self._blocked_edges))
+        cache_key=(float(position[0]),float(position[1]),len(self._blocked_edges),float(max_distance))
         if cache_key in cache:return cache[cache_key]
         best=None;px,py=float(position[0]),float(position[1])
-        for a,b in self._road_edges:
+        # Only edges near the point (spatial hash), visited in edge-list order so ties resolve as before.
+        for a,b in self._edges_near(px,py,max_distance):
             dx,dy=b[0]-a[0],b[1]-a[1]
             ratio=max(0,min(1,((px-a[0])*dx+(py-a[1])*dy)/(dx*dx+dy*dy)))
             p=(a[0]+ratio*dx,a[1]+ratio*dy)
             cost=math.sqrt((px-p[0])**2+(py-p[1])**2)
-            if cost>150 or (best is not None and cost>=best[0]):continue
+            if cost>max_distance or (best is not None and cost>=best[0]):continue
             if tuple(sorted((a,b))) in self._blocked_edges:continue
             checks=max(2,int(cost/12))
             if any(self._submerged(q) and not self._elevated_crossing(q) for q in ([px+(p[0]-px)*k/checks,py+(p[1]-py)*k/checks] for k in range(checks+1))):continue
@@ -829,9 +927,11 @@ class OperationsSimulation:
             return None
         source,destination=first[0],last[0]
         graph=self._road_graph;blocked=self._blocked_edges
-        queue=[(0,0,source)];costs={source:0};previous={};serial=0
+        # A* (straight-line heuristic is admissible: every edge is at least its chord length).
+        ex,ey=float(end[0]),float(end[1]);hypot=math.hypot
+        queue=[(hypot(source[0]-ex,source[1]-ey),0,0,source)];costs={source:0};previous={};serial=0
         while queue:
-            cost,_,node=heapq.heappop(queue)
+            _,_,cost,node=heapq.heappop(queue)
             if cost>costs[node]:
                 continue
             if node==destination:
@@ -849,87 +949,27 @@ class OperationsSimulation:
                 value=cost+length
                 if value<costs.get(neighbor,float("inf")):
                     costs[neighbor]=value;previous[neighbor]=node;serial+=1
-                    heapq.heappush(queue,(value,serial,neighbor))
+                    heapq.heappush(queue,(value+hypot(neighbor[0]-ex,neighbor[1]-ey),serial,value,neighbor))
         return None
 
-    def _flight_grid(self):
-        """World-static flight grid data (no-fly polygons, obstacle ceiling), built once per world."""
-        grid=self.__dict__.get("_flight_grid_cache")
-        if grid is not None:return grid
-        bounds=self.world.get("bounds",[-600,-600,600,600]);spacing=35
-        nx=max(1,int((bounds[2]-bounds[0])/spacing));ny=max(1,int((bounds[3]-bounds[1])/spacing))
-        polygons=[]
-        for zone in self.world.get("no_fly",self.world.get("no_fly_zones",[])):
-            if isinstance(zone,dict):
-                polygon=zone.get("polygon",zone.get("footprint",[]))
-                if not polygon and "center" in zone:
-                    center=zone["center"];radius=float(zone.get("radius",30))+8
-                    polygon=[[center[0]+radius*math.cos(i*math.tau/24),center[1]+radius*math.sin(i*math.tau/24)] for i in range(24)]
-                polygons.append(polygon)
-            else:polygons.append(zone)
-        polygons=[p for p in polygons if len(p)>2]
-        ceiling=max((float(b.get("height",0))+12 for b in self.world.get("buildings",[])),default=0)
-        grid={"bounds":bounds,"spacing":spacing,"nx":nx,"ny":ny,"polygons":polygons,"ceiling":ceiling,"edges":{},"paths":{}}
-        self._flight_grid_cache=grid
-        return grid
+    def _flight_planner(self):
+        """World-static any-angle flight planner (swarm_ops.planning), built once per world."""
+        planner=self.__dict__.get("_planner")
+        if planner is None:planner=self._planner=FlightPlanner(self.world)
+        return planner
 
     def _restricted(self,a,b):
-        polygons=self._flight_grid()["polygons"]
-        if not polygons:return False
-        count=max(2,int(_distance(a[:2],b[:2])/8)+1)
-        return any(_inside([a[0]+(b[0]-a[0])*i/count,a[1]+(b[1]-a[1])*i/count],p) for p in polygons for i in range(count+1))
+        """True if a point (a==b) is inside, or the segment a-b crosses, a no-fly polygon."""
+        planner=self._flight_planner()
+        if not planner.polygons:return False
+        return planner.restricted(a[:2]) if list(a[:2])==list(b[:2]) else planner.blocked(a[:2],b[:2])
 
-    def _grid_cells(self,source,dest):
-        """Cached 8-connected A* over the static flight grid (pure function of the two cells)."""
-        grid=self._flight_grid()
-        if (source,dest) in grid["paths"]:return grid["paths"][(source,dest)]
-        bounds,spacing,nx,ny,edges=grid["bounds"],grid["spacing"],grid["nx"],grid["ny"],grid["edges"]
-        def point(c):return [bounds[0]+c[0]*spacing,bounds[1]+c[1]*spacing]
-        def blocked(a,b):
-            key=(a,b) if a<b else (b,a)
-            if key not in edges:edges[key]=self._restricted(point(a),point(b))
-            return edges[key]
-        dp=point(dest)
-        queue=[(0,source)];costs={source:0};previous={};result=None
-        while queue:
-            _,node=heapq.heappop(queue)
-            if node==dest:
-                path=[node]
-                while node in previous:
-                    node=previous[node];path.append(node)
-                path.reverse();result=path
-                break
-            for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)):
-                neighbor=(node[0]+dx,node[1]+dy)
-                if not (0<=neighbor[0]<=nx and 0<=neighbor[1]<=ny) or blocked(node,neighbor):
-                    continue
-                value=costs[node]+math.hypot(dx,dy)*spacing
-                if value<costs.get(neighbor,float("inf")):
-                    costs[neighbor]=value;previous[neighbor]=node
-                    np_=point(neighbor)
-                    heapq.heappush(queue,(value+_distance([*np_,0],[*dp,0]),neighbor))
-        if len(grid["paths"])>20000:grid["paths"].clear()
-        grid["paths"][(source,dest)]=result
-        return result
-
-    def _drone_path(self, drone, target):
-        grid=self._flight_grid()
-        altitude=max(drone["cruise"],float(target[2])+12,grid["ceiling"])+drone.get("lane",0)
-        # Horizontal grid A* routes around restricted zones; roof surveys remain
-        # above the highest obstacle. Vertical motion is simulated kinematically.
-        bounds,spacing,nx,ny=grid["bounds"],grid["spacing"],grid["nx"],grid["ny"]
-        if not bounds[0]<=target[0]<=bounds[2] or not bounds[1]<=target[1]<=bounds[3]:return None
-        restricted=self._restricted
-        if restricted(target,target) or restricted(drone["position"],drone["position"]):
-            return None
-        def cell(p):return (max(0,min(nx,round((p[0]-bounds[0])/spacing))),max(0,min(ny,round((p[1]-bounds[1])/spacing))))
-        def point(c):return [bounds[0]+c[0]*spacing,bounds[1]+c[1]*spacing,altitude]
-        path=self._grid_cells(cell(drone["position"]),cell(target))
-        if path is None:return None
-        coords=[point(p) for p in path]
-        if restricted(drone["position"],coords[0]) or restricted(coords[-1],target):
-            return None
-        return [[*drone["position"][:2],altitude]]+coords+[[target[0],target[1],altitude]]
+    def _drone_path(self,drone,target,standoff=0.0,observe=False):
+        """3-D route from the drone's current position (line of sight, else visibility graph round
+        no-fly zones), altitude from obstacles along this path; incident targets end at a stand-off
+        hover point facing the approach. None when no permitted route exists."""
+        waypoints,info=self._flight_planner().route(drone["position"],target,drone["cruise"],drone.get("lane",0.0),standoff,observe)
+        return waypoints
 
     @staticmethod
     def _route_distance(position,route):
@@ -959,7 +999,7 @@ class OperationsSimulation:
             incident["wait_reason"]=None
             for kind in ([] if self.external_ground else incident["required_kinds"]):
                 if kind in incident["completed_kinds"]:continue
-                assigned=next((r for r in self.resources if r["kind"]==kind and r["incident_id"]==incident["id"]),None)
+                assigned=next((r for r in self.resources if _serves(r,kind) and r["incident_id"]==incident["id"]),None)
                 # The local units act as a mock orchestrator answering the swarm's resource requests;
                 # a follow-up request (e.g. more people than one unit carries) adds another unit.
                 extra=any(q["needed_kind"]==kind and q["status"]=="open" and q["stage"]!="report" for q in incident.get("resource_requests",[]))
@@ -968,12 +1008,13 @@ class OperationsSimulation:
                     continue
                 offers=[]
                 for resource in self.resources:
-                    if resource["state"]!="available" or resource["kind"]!=kind:continue
+                    if resource["state"]!="available" or not _serves(resource,kind):continue
                     route=self._resource_path(resource,incident)
                     # Off-map units add their real remaining distance to the district edge.
-                    if route is not None:offers.append((self._route_distance(resource["position"],route)+resource.get("approach_m",0),resource["id"],resource,route))
+                    # The exact kind is preferred over an accepted substitute.
+                    if route is not None:offers.append((int(resource["kind"]!=kind),self._route_distance(resource["position"],route)+resource.get("approach_m",0),resource["id"],resource,route))
                 if offers:
-                    length,_,resource,route=min(offers,key=lambda offer:offer[:2])
+                    _,length,_,resource,route=min(offers,key=lambda offer:offer[:3])
                     resource.update(state="enroute",incident_id=incident["id"],route=route,eta=length/(7 if resource.get("transport")=="boat" else 9),acknowledged=False,arrived_at=None)
                     if resource.get("approach_m",0)>0:
                         approach_s=resource["approach_m"]/(7 if resource.get("transport")=="boat" else GROUND_SPEED);resource["approach_until"]=self.t+approach_s
@@ -990,8 +1031,11 @@ class OperationsSimulation:
                     self._fulfil_request(incident,kind,resource["id"])
                 elif assigned is None:incident["wait_reason"]=f"No available {kind} with a traversable route"
             if incident["handed_over"] or incident["drone_id"] or incident["uncertain_delivery"]:continue
-            if self.docks and self._launched()>=DOCK_DISPATCH_CAP:
-                incident["wait_reason"]=f"Launch cap of {DOCK_DISPATCH_CAP} reached; next aircraft launches when one is back at its dock"
+            if self.docks and self._launched()>=self._cap_total():
+                incident["wait_reason"]=f"Launch cap of {self._cap_total()} reached; next aircraft launches when one is back at its dock"
+                continue
+            if sum(1 for d in self.drones if d["task_id"]==incident["id"] and d["active"])>=self._cap_per_incident():
+                incident["wait_reason"]=f"Per-incident cap of {self._cap_per_incident()} aircraft reached"
                 continue
             offers=[]
             candidates=self.drones
@@ -1017,7 +1061,7 @@ class OperationsSimulation:
                     candidates+=sorted(stocked,key=lambda d:(_distance(d["position"],incident["position"]),d["id"]))[:3]
             for drone in candidates:
                 if not drone["active"] or not drone["link"] or drone["state"] not in ("ready","patrolling"):continue
-                route=self._drone_path(drone,incident["position"])
+                route=self._drone_path(drone,incident["position"],standoff=STANDOFF_M,observe=True)
                 recovery=self._drone_path({**drone,"position":incident["position"]},drone.get("home",self._base))
                 if route is None or recovery is None:continue
                 travel=self._route_distance(drone["position"],route)
@@ -1038,7 +1082,7 @@ class OperationsSimulation:
                 if was_searching:self._event("search_to_confirm",f"{drone['id']} leaves its search sweep (zone kept) to confirm {incident['id']}; winning bid {bid:.1f} of {len(offers)}.",incident["id"])
                 incident["drone_id"]=drone["id"];incident["status"]="responding"
                 purpose=f"bringing {drone['payload']}" if supply_only else "first assessment"
-                if drone.get("dock_id"):self._event("drone_launch",f"{drone['id']} launched from {drone['dock_id']} for {purpose} ({self._launched()}/{DOCK_DISPATCH_CAP} airborne); ground response continues independently.",incident["id"])
+                if drone.get("dock_id"):self._event("drone_launch",f"{drone['id']} launched from {drone['dock_id']} for {purpose} ({self._launched()}/{self._cap_total()} airborne); ground response continues independently.",incident["id"])
                 else:self._event("drone_dispatch",f"{drone['id']} wins feasible local bid; ground response continues independently.",incident["id"])
                 self._signal("dispatch","drone",drone["id"],["control"],drone["position"],incident["id"],
                              f"{drone['id']} {'launching from '+drone['dock_id'] if drone.get('dock_id') else 'dispatched'} to {incident['id']} ({purpose}), ETA {travel_eta(drone,route):.0f} s.")
@@ -1083,9 +1127,30 @@ class OperationsSimulation:
     INCIDENT_TEMPLATES={
         "medical":("Casualty needs first aid and transport",4,(1,2),["first_aid","medical"],["ambulance"]),
         "flood":("Residents stranded on a flooded rooftop",5,(3,8),["food","rescue"],["rescue"]),
-        "fire":("Building fire; occupants on upper floors",5,(3,8),["assessment","first_aid"],["fire_engine"]),
+        "fire":("Building fire; occupants on upper floors",5,(3,8),["assessment","first_aid"],["fire_engine","ambulance"]),
         "trapped":("Residents trapped in a damaged building",4,(2,6),["food","first_aid"],["rescue"]),
-        "blocked_route":("Road blocked; access route assessment",3,(2,5),["assessment"],["engineering","rescue"])}
+        "blocked_route":("Road blocked; access route assessment",3,(2,5),["assessment"],["engineering","rescue"]),
+        # DisruptionOps categories (incident_category_needs capabilities).
+        "person_stranded":("People stranded by flood water",5,(2,6),["food","rescue"],["boat"]),
+        "flooded_road":("Road under water; dewatering needed",3,(1,4),["assessment"],["pump"]),
+        "waterlogging":("Waterlogged street; dewatering needed",2,(2,6),["assessment"],["pump"]),
+        "fallen_tree":("Tree down across the road",2,(1,3),["assessment"],["engineering"]),
+        "structural_damage":("Structure collapsed; someone may be trapped",4,(1,4),["assessment","first_aid"],["engineering","rescue"]),
+        "evacuation":("Residents need evacuation",4,(10,40),["food"],["bus"]),
+        "supply_shortage":("Relief point short of supplies",3,(30,150),["food"],["supply_truck"]),
+        "shelter_full":("Shelter full; families need transport to another",3,(15,40),["food"],["bus"]),
+        "air_quality":("Smoke and gas; people affected",3,(2,6),["first_aid","medical"],["ambulance"])}
+    # Where an operator click / random site goes: a roof (building) or an open road point.
+    ROOF_CATEGORIES=("fire","trapped","flood","person_stranded","structural_damage")
+    # random_incident without a category draws from these (keeps seeded draws stable).
+    CLASSIC_CATEGORIES=("blocked_route","fire","flood","medical","trapped")
+
+    def _category(self,category):
+        """Native template first; otherwise a registered alias (e.g. a plug-in's DisruptionOps mapping)."""
+        if category in self.INCIDENT_TEMPLATES:return category
+        alias=CATEGORY_ALIASES.get(category)
+        if alias in self.INCIDENT_TEMPLATES:return alias
+        raise ValueError(f"Unknown incident category '{category}'; known: {', '.join(sorted(self.INCIDENT_TEMPLATES))}")
 
     def _open_incidents(self):
         return sum(i["status"]!="resolved" for i in self.incidents)
@@ -1125,8 +1190,8 @@ class OperationsSimulation:
         if snap:position,building_id=self._snap_detection(position,category)
         if self._in_no_fly(position):return answer(False,"inside a no-fly zone; aerial response not permitted")
         if self._open_incidents()>=MAX_OPEN_INCIDENTS:return answer(False,f"swarm at capacity ({MAX_OPEN_INCIDENTS} open incidents)")
-        capped=bool(self.docks) and self._launched()>=DOCK_DISPATCH_CAP
-        if capped and kind!="sos":return answer(False,f"launch cap of {DOCK_DISPATCH_CAP} airborne aircraft reached; retry later")
+        capped=bool(self.docks) and self._launched()>=self._cap_total()
+        if capped and kind!="sos":return answer(False,f"launch cap of {self._cap_total()} airborne aircraft reached; retry later")
         feasible=None
         for drone in sorted((d for d in self.drones if d["active"] and d["link"]),key=lambda d:(_distance(d["position"],position),d["id"]))[:6]:
             home=drone.get("home",self._base)
@@ -1145,7 +1210,7 @@ class OperationsSimulation:
         eta=travel_eta(drone,drone["route"]) if drone and drone["route"] else None
         plan=[]
         if drone:plan.append(f"launch {drone['id']}"+(f" from {drone['dock_id']}" if drone.get("dock_id") else "")+" to assess and brief")
-        elif capped:plan.append(f"queued: next aircraft launches when one of {DOCK_DISPATCH_CAP} airborne is back at its dock")
+        elif capped:plan.append(f"queued: next aircraft launches when one of {self._cap_total()} airborne is back at its dock")
         else:plan.append("queued: waiting for an energy-feasible aircraft")
         own=[n for n in incident["needs"] if n in SUPPLY_ITEMS]
         if own:plan.append("drop "+", ".join(own)+" if a stocked aircraft is available")
@@ -1172,21 +1237,21 @@ class OperationsSimulation:
         """Valid random location for an operator-added incident (r is a dedicated, reproducible RNG)."""
         b=self.world.get("bounds",[-600,-600,600,600])
         def usable(xy):return b[0]+60<xy[0]<b[2]-60 and b[1]+60<xy[1]<b[3]-60 and not self._in_no_fly(xy) and min((_distance(xy,i["position"][:2]) for i in self.incidents if i["status"]!="resolved"),default=1e9)>45
-        if category in ("fire","trapped","flood"):
+        if category in self.ROOF_CATEGORIES and self._building_index():
             reach=self._reachable_road_nodes(self._base)
             pool=sorted(self._building_index())
             r.shuffle(pool)
             for building_id,c,pts,height in pool[:400]:
                 if not usable(c):continue
                 wet=self._submerged(c)
-                if category=="flood":
+                if category in ("flood","person_stranded"):
                     # Boat case: a roof inside the flood corridor.
                     if not wet:continue
                 else:
                     link=self._road_connector(c)
                     if wet or link is None or link[1] not in reach or link[0]>60:continue
                 return [round(c[0],2),round(c[1],2),height],building_id
-            if category!="flood":return None,None
+            if category not in ("flood","person_stranded"):return None,None
             projection=self._river_projection([0,0,0])
             return ([round(projection[1][0],2),round(projection[1][1],2),self.flood["level"]],None) if projection else (None,None)
         nodes=sorted(q for q in self._reachable_road_nodes(self._base) if usable(q) and not self._submerged(q))
@@ -1200,9 +1265,9 @@ class OperationsSimulation:
         b=self.world.get("bounds",[-600,-600,600,600])
         if not (b[0]<=position[0]<=b[2] and b[1]<=position[1]<=b[3]):return position,None
         building=self._building_at(position[:2])
-        if building and category in ("fire","trapped","flood"):
+        if building and category in self.ROOF_CATEGORIES:
             return [round(building[1][0],2),round(building[1][1],2),building[3]],building[0]
-        if category in ("medical","blocked_route"):
+        if category not in self.ROOF_CATEGORIES or not self._building_index():
             if building:  # a casualty is reported at the street side of the building
                 position=[building[1][0],building[1][1],0]
             link=self._road_connector(position)
@@ -1295,14 +1360,18 @@ class OperationsSimulation:
         ranked=sorted(zone,key=lambda c:(-round(c["p"],3),_distance(c["center"],drone["position"][:2]),c["id"]))
         for cell in ranked[:4]:
             cx,cy=cell["center"]
-            path=self._drone_path(drone,[cx,cy,0])
+            h=self.search_spacing*.3
+            # Two-lane boustrophedon (lane spacing 0.6 cell ~ 2x sensor radius at cruise), entered at the
+            # corner nearest the drone so the sweep never doubles back through the cell centre.
+            corners=[[cx-h,cy-h],[cx+h,cy-h],[cx+h,cy+h],[cx-h,cy+h]]
+            first=min(range(4),key=lambda k:(_distance(corners[k],drone["position"][:2]),k))
+            corners=[c for c in corners[first:]+corners[:first] if not self._restricted(c,c)]
+            path=None if self._restricted([cx,cy],[cx,cy]) else self._drone_path(drone,[*(corners[0] if corners else [cx,cy]),0])
             if path is None:
                 cell["blocked"]=True;self._zone_key=None
                 continue
-            altitude=path[-1][2];h=self.search_spacing*.3
-            # Two-lane boustrophedon (lane spacing 0.6 cell ~ 2x sensor radius at cruise).
-            legs=[[cx-h,cy-h,altitude],[cx+h,cy-h,altitude],[cx+h,cy+h,altitude],[cx-h,cy+h,altitude]]
-            legs=[p for p in legs if not self._restricted(p,p)]
+            altitude=path[-1][2]
+            legs=[[c[0],c[1],altitude] for c in corners[1:]]
             drone.update(state="patrolling",route=path+legs,coverage_task=(cx,cy),search_target=cell["id"])
             return True
         return False
@@ -1324,7 +1393,7 @@ class OperationsSimulation:
         incident["observations"]+=1;incident["last_observed"]=self.t
         previous=incident["briefing"] or {}
         briefing={"observed_at":round(self.t,2),"source":drone["id"] if drone else "ground crew",
-            "people":incident["people"],"hazards":{"flood":["flood water"],"fire":["fire","smoke"],"trapped":["smoke","restricted access"]}.get(incident["category"],["restricted access"]),
+            "people":incident["people"],"hazards":HAZARDS.get(incident["category"],["restricted access"]),
             "needs":list(incident["needs"]),"supplied":list(incident["supplied"]),
             "summary":f"{incident['people']} people; needs: {', '.join(incident['needs'])}. Ground assessment required.",
             "confidence":0.82 if drone else 0.95}
@@ -1346,7 +1415,7 @@ class OperationsSimulation:
             # Understand -> resources: compare what the scene needs with what is on the way.
             for kind in incident["required_kinds"]:
                 if kind not in TRANSPORT_KINDS:continue
-                units=[r for r in self.resources if r["kind"]==kind and r.get("incident_id")==incident["id"]]
+                units=[r for r in self.resources if _serves(r,kind) and r.get("incident_id")==incident["id"]]
                 capacity=sum(r.get("capacity",0) for r in units)
                 if units and incident["people"]>capacity and not any(q["needed_kind"]==kind and q["stage"]=="assessment" for q in incident["resource_requests"]):
                     self._raise_resource_request(incident,kind,1,f"briefing r{incident['briefing']['revision']}: {incident['people']} people exceed {capacity} seats on the way","assessment")
@@ -1380,7 +1449,7 @@ class OperationsSimulation:
             self._signal("briefing","resource",resource["id"],[*others,"control"],resource["position"],incident["id"],
                          f"Ground-crew briefing from {resource.get('name',resource['id'])}: {incident['people']} people, needs {', '.join(incident['needs'])}.")
         resource["acknowledged"]=True;resource["state"]="on_scene"
-        if resource.get("transport")=="boat" or resource["kind"] in ("ambulance","rescue"):
+        if _carries_people(resource):
             # Do not double-count people already aboard another unit at this incident.
             aboard=sum(r.get("load",0) for r in self.resources if r is not resource and r.get("incident_id")==incident["id"])
             resource["load"]=min(resource["capacity"],max(0,incident["people"]-incident["evacuated_people"]-aboard))
@@ -1551,7 +1620,7 @@ class OperationsSimulation:
                 if resource["state"]=="awaiting_handoff" and incident and self.t-resource["arrived_at"]>=4:
                     self._ack(incident,resource)
                 if resource["state"]=="on_scene" and self.t>=resource.get("service_end",float("inf")) and incident:
-                    transport=resource.get("transport")=="boat" or resource["kind"] in ("ambulance","rescue")
+                    transport=_carries_people(resource)
                     if transport and resource["load"]==0 and incident["evacuated_people"]<incident["people"]:
                         # Everyone left is already aboard another unit: this unit is released, not "completed".
                         resource.update(state="available",incident_id=None,eta=None,acknowledged=False)
@@ -1576,7 +1645,9 @@ class OperationsSimulation:
             # Fire crews bring occupants down to the street during their (timed) service.
             moved=incident["people"]-incident["evacuated_people"];incident["evacuated_people"]=incident["people"]
             self._event("evacuation",f"{resource['id']} brought {moved} occupants down to safety; {incident['evacuated_people']}/{incident['people']} safe.",incident["id"])
-        if resource["kind"] not in incident["completed_kinds"]:incident["completed_kinds"].append(resource["kind"])
+        served=[k for k in incident["required_kinds"] if _serves(resource,k) and k not in incident["completed_kinds"]][:1]
+        for kind in served or ([resource["kind"]] if resource["kind"] not in incident["completed_kinds"] else []):
+            incident["completed_kinds"].append(kind)
         if all(k in incident["completed_kinds"] for k in incident["required_kinds"]):
             incident["status"]="resolved";incident["resolved_at"]=self.t
             self._event("resolved","Required agency actions completed; incident resolved.",incident["id"])
@@ -1679,8 +1750,7 @@ class OperationsSimulation:
                 if not isinstance(raw,list) or len(raw) not in (2,3) or any(isinstance(v,bool) or not isinstance(v,(int,float)) for v in raw):raise ValueError("Detection position must be two or three finite coordinates")
                 position=([float(v) for v in raw]+[0.0])[:3]
                 if not all(math.isfinite(v) and abs(v)<1e6 for v in position):raise ValueError("Detection position must be two or three finite coordinates")
-                category=payload.get("category","medical")
-                if category not in self.INCIDENT_TEMPLATES:raise ValueError("Unknown incident category")
+                category=self._category(payload.get("category","medical"))
                 needs=self._validated_needs(payload.get("needs",["first_aid"]))
                 severity,people=self._validated_numbers(payload)
                 # UI detections are SOS requests through the same agency path as the orchestrator.
@@ -1689,12 +1759,14 @@ class OperationsSimulation:
                 if not created["accepted"]:raise ValueError(created["reason"])
             elif action=="random_incident":
                 category=payload.get("category")
-                if category is not None and category not in self.INCIDENT_TEMPLATES:raise ValueError("category must be one of medical, flood, fire, trapped, blocked_route")
+                if category is not None:
+                    try:category=self._category(category)
+                    except ValueError:raise ValueError("category must be one of "+", ".join(sorted(self.INCIDENT_TEMPLATES))) from None
                 if self._open_incidents()>=MAX_OPEN_INCIDENTS:raise ValueError(f"Too many open incidents (limit {MAX_OPEN_INCIDENTS})")
                 # Reproducible: depends only on (seed, counter, category), not on wall time or the sim RNG stream.
                 self._random_incidents+=1
                 r=random.Random(f"{self.seed}:random_incident:{self._random_incidents}")
-                category=category or r.choice(sorted(self.INCIDENT_TEMPLATES))
+                category=category or r.choice(self.CLASSIC_CATEGORIES)
                 position,building_id=self._random_site(category,r)
                 if position is None:raise ValueError(f"No valid location for a {category} incident on this map")
                 title,severity,(low,high),needs,required=self.INCIDENT_TEMPLATES[category]
@@ -1714,8 +1786,7 @@ class OperationsSimulation:
                     if kind not in REQUEST_KINDS:raise ValueError("kind must be one of sos, assess, supply, overwatch")
                     raw=payload.get("position")
                     if not isinstance(raw,list) or len(raw) not in (2,3) or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in raw):raise ValueError("position must be two or three finite coordinates")
-                    category=payload.get("category","medical")
-                    if category not in self.INCIDENT_TEMPLATES:raise ValueError("Unknown incident category")
+                    category=self._category(payload.get("category","medical"))
                     default_needs={"assess":["assessment"],"overwatch":["assessment"]}.get(kind,self.INCIDENT_TEMPLATES[category][3])
                     needs=self._validated_needs(payload.get("needs",default_needs))
                     severity,people=self._validated_numbers({"severity":payload.get("priority",3),"people":payload.get("people",1)})
@@ -1886,4 +1957,13 @@ class OperationsSimulation:
                 "open_incidents":len(active),"resolved_incidents":len(self.incidents)-len(active),
                 "available_resources":sum(r["state"]=="available" for r in self.resources),
                 "handoffs":sum(i["handed_over"] for i in self.incidents),"supply_drops":sum(len(i["supplied"]) for i in self.incidents),
-                "faults":self._faults,"launched":self._launched() if self.docks else None,"dispatch_cap":DOCK_DISPATCH_CAP if self.docks else None,"covered_patches":sum(c["last"] is not None for c in self.search_cells.values()),"total_patches":len(self.search_cells),"simulation_only":True,"external_ground":self.external_ground,"agency":self._agency_metrics(),"allocation_mode":"deterministic feasible bids (central simulation harness)"}})
+                "faults":self._faults,"launched":self._launched() if self.docks else None,"dispatch_cap":self._cap_total() if self.docks else None,"dispatch_cap_per_incident":self._cap_per_incident() if self.docks else None,"covered_patches":sum(c["last"] is not None for c in self.search_cells.values()),"total_patches":len(self.search_cells),"simulation_only":True,"external_ground":self.external_ground,"agency":self._agency_metrics(),"allocation_mode":"deterministic feasible bids (central simulation harness)"}})
+
+
+# Plug-in scenarios/worlds (swarm_ops/scenarios/*) register themselves on import. Imported last so
+# their `from swarm_ops import engine` sees a fully initialised module.
+try:
+    import swarm_ops.scenarios  # noqa: F401,E402
+except ImportError as _error:  # pragma: no cover - optional package
+    if getattr(_error, "name", "") not in ("swarm_ops.scenarios",):
+        raise
