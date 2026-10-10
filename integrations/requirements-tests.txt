@@ -1,0 +1,4 @@
+# Only needed to validate the optional unmounted DisruptionOps adapter contract.
+# The disabled bridge and main WebSocket server do not import these packages.
+fastapi>=0.115,<1
+pydantic>=2.9,<3

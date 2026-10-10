@@ -1,0 +1,36 @@
+digraph Operations {
+  graph [rankdir=LR, bgcolor="#F7F9FC", pad="0.45", nodesep="0.42", ranksep="0.65", splines=polyline, fontname="Segoe UI", fontsize=20, labelloc=t, label="Disaster swarm · local operations architecture\n50 modeled drones / 3 scenarios / concurrent civilian response"];
+  node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#D5DEE9", fontname="Segoe UI", fontsize=12, fontcolor="#263D52", margin="0.20,0.14", penwidth=1.3];
+  edge [fontname="Segoe UI", fontsize=10, color="#71869C", fontcolor="#566D83", arrowsize=0.75, penwidth=1.25];
+
+  subgraph cluster_data {
+    label="Geographic reference"; fontsize=14; color="#DCE6F0"; style="rounded";
+    source [label="OSM footprints + roads\nGoogle 2023 predicted heights\nCoarse SRTM terrain", fillcolor="#EDF4FC", color="#B6CCE6"];
+    overlay [label="Fictional disaster overlay\nRiver · flood corridor · shelters\nRoad closures + safe crossings", fillcolor="#EDF4FC", color="#B6CCE6"];
+  }
+  subgraph cluster_local {
+    label="Your hardware · authoritative simulation"; fontsize=14; color="#BCD5E7"; style="rounded";
+    engine [label="Mission state + deterministic allocation\nCapability + ETA + energy + coverage\n20 Hz kinematic mission step", fillcolor="#E7F4EF", color="#A7CFC0"];
+    drones [label="1–100 modeled aircraft\nAssessment + supplies + patrol\nRecovery · stock reload · failure state", fillcolor="#E7F4EF", color="#A7CFC0"];
+    ground [label="Modeled ground response\nAmbulance · rescue boat · engineers\nArrival + briefing ACK + transport", fillcolor="#E7F4EF", color="#A7CFC0"];
+    journal [label="SQLite event journal\nDurable cursor + ordered replay", fillcolor="#FFF7E8", color="#E2CDA0"];
+    transport [label="HTTP + WebSocket v2\n10 Hz snapshots + command ACKs\nScoped tokens · 2-frame client queues", fillcolor="#EAF1FC", color="#B0C5E7"];
+  }
+  viewer [label="Browser / Astra 3D interface\nOblique · top · follow cameras\nActual paths, briefing and agency progress", fillcolor="#EAF1FC", color="#B0C5E7"];
+  tunnel [label="Optional trial Cloudflare viewer\nLocal compute · public view only\nTemporary development URL", fillcolor="#F0F2F5", color="#CDD4DD"];
+  future [label="Future DisruptionOps connector\nGround authority + verified handoff\nPrepared only · disconnected", fillcolor="#F0F2F5", color="#CDD4DD", style="rounded,filled,dashed"];
+
+  source -> engine [label="prepared assets"];
+  overlay -> engine [label="scenario seed"];
+  engine -> drones [label="feasible task / route"];
+  engine -> ground [label="parallel dispatch"];
+  drones -> engine [label="assessment / energy"];
+  ground -> engine [label="ACK / service completion"];
+  engine -> journal [label="domain events"];
+  engine -> transport [label="snapshot"];
+  journal -> transport [label="replay cursor"];
+  transport -> viewer [label="telemetry + ACK"];
+  viewer -> transport [label="authorized exercise commands"];
+  transport -> tunnel [style=dashed, label="optional WSS"];
+  future -> engine [style=dashed, label="future scoped adapter"];
+}

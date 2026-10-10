@@ -1,0 +1,34 @@
+digraph Fleet {
+  graph [rankdir=TB, bgcolor="#f8fafc", fontname="Arial", fontsize=23, pad="0.45", nodesep="0.35", ranksep="0.65", splines=polyline, label="50 DRONES: LOCAL SAFETY, FIELD COORDINATION\nExample: five teams of ten supporting flood response", labelloc=t];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=12, margin="0.2,0.14", color="#cbd5e1", fillcolor="white", fontcolor="#0f172a"];
+  edge [fontname="Arial", fontsize=10, color="#64748b", arrowsize=0.75];
+  ops [label="DISRUPTIONOPS + INCIDENT COMMAND\nIncident priorities, approvals, boats / rescue teams\nFleet overview and mission outcomes", fillcolor="#dbeafe", color="#2563eb", penwidth=2];
+  journal [label="DURABLE MISSION / EVENT RECORD\nTask ownership, acknowledgments, evidence\nReplay observations; reject stale commands", fillcolor="#e2e8f0"];
+  subgraph cluster_field {
+    label="FIVE FIELD COORDINATORS — each manages 10 aircraft"; fontname="Arial"; fontsize=16; color="#0d9488"; style="rounded"; bgcolor="#f0fdfa";
+    alloc [label="TASK ALLOCATOR\nCapability + urgency + air-route ETA\nEnergy feasibility + ownership + flight slots", fillcolor="#ccfbf1"];
+    energy [label="ENERGY + GROUND LOGISTICS\nMeasured power / wind / payload\nRecovery reserve, battery swaps, pad queues", fillcolor="#fef3c7"];
+    gateway [label="LOCAL RADIO GATEWAY + EVENT JOURNAL\nCommands / alerts first; telemetry next\nSelected media last; offline store-and-forward", fillcolor="#ccfbf1"];
+    {rank=same; alloc; energy;}
+  }
+  teams [label="TEAMS A / B / C / D / E\n10 drones per team = 50 total\nRadio mesh or direct radio / LTE to local gateway\nNeighbors share limited position / intent", fillcolor="#e0f2fe", color="#0284c7"];
+  subgraph cluster_aircraft {
+    label="THIS STACK EXISTS ON EVERY AIRCRAFT"; fontname="Arial"; fontsize=16; color="#7c3aed"; style="rounded"; bgcolor="#faf5ff";
+    agent [label="ONBOARD MISSION AGENT\nCurrent task + expiring command IDs\nCamera detections + local avoidance\nEnergy estimate + cached contingency", fillcolor="#ede9fe"];
+    fc [label="FLIGHT CONTROLLER: PX4 / ARDUPILOT\nStabilization + navigation health\nTested battery / link / geofence failsafes", fillcolor="#ddd6fe", color="#7c3aed", penwidth=2];
+  }
+  failure [label="MISSING HEARTBEAT != CRASH\nMark unreachable; retain last known state\nCheck task / airspace conflict before reassignment\nDelivery outcome uncertain? Verify before retry", fillcolor="#fee2e2", color="#dc2626"];
+  ops -> alloc [label="approved mission + scope + expiry", color="#2563eb", penwidth=2];
+  ops -> journal [label="record authority / decisions"];
+  alloc -> gateway [label="assignment with ID + generation"];
+  energy -> alloc [label="eligible aircraft + recovery budget"];
+  gateway -> teams [label="authenticated task / abort / recall", color="#2563eb", penwidth=2];
+  teams -> gateway [label="health + battery + observations + ACK", color="#0d9488", penwidth=2];
+  gateway -> journal [label="sync when backhaul available", style=dashed];
+  journal -> ops [label="incidents + confirmed outcomes", constraint=false];
+  teams -> agent [label="local task execution"];
+  agent -> fc [label="local MAVLink / validated interface"];
+  gateway -> failure [label="stale aircraft or failed task"];
+  failure -> alloc [label="safe remaining work only", style=dashed, constraint=false];
+  agent -> energy [label="measured energy / return forecast", style=dashed, constraint=false];
+}

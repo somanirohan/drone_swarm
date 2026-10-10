@@ -1,5 +1,18 @@
 # Agentic disaster-response drone swarm
 
+## New geographic operations viewer
+
+The independent Pune flood demonstrator adds a 3D map, 1–100 modeled drones, concurrent ground response, three randomized scenarios and a bidirectional local WebSocket. DisruptionOps is unchanged and remains disconnected until a later integration step.
+
+```powershell
+.\.conda-drones\python.exe -m pip install -r requirements-ops.txt
+.\run-operations.ps1 -Fleet 50
+```
+
+Open `http://localhost:8787`. Add `-Tunnel` for a temporary Cloudflare view-only URL, with simulation running on your hardware. To share it with a friend, run `.\share-with-friend.ps1` (first time: `.\setup-ops.ps1` for a clean environment, or use the bundled `.conda-drones`). It starts the simulator and a read-only Cloudflare tunnel, verifies it, then prints and copies a ready-to-send message with the viewer link and `wss://…/ops/ws` address. Read the [implementation plan](docs/implementation/implementation-plan.md) and [WebSocket contract](docs/implementation/websocket-protocol.md). This viewer is a kinematic mission demonstrator; the original PyBullet exercise described below remains separate.
+
+For the implemented drone/agency flows and their current limits, read [handled cases](docs/implementation/HANDLED-CASES.md). To connect another application, use the [complete WebSocket handoff](docs/implementation/FRIEND-WEBSOCKET-HANDOFF.md), with copyable JavaScript/Python clients, all action options, field definitions and proxy configuration.
+
 Twelve Crazyflie CF2X drones explore an earthquake district built from textured CC0 ruined-city assets, discover rescue sites, coordinate supply deliveries and return to base. The simulation uses the vendored gym-pybullet-drones motor physics and PID controller.
 
 Two mission modes are available:

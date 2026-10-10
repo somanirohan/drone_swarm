@@ -1,0 +1,2 @@
+# Lightweight operations demo; existing PyBullet environment remains separate.
+websockets==17.2

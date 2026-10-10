@@ -1,0 +1,26 @@
+digraph Realtime {
+  graph [rankdir=TB, bgcolor="#f8fafc", fontname="Arial", fontsize=21, pad=0.35, nodesep=0.4, ranksep=0.5, label="HOW A DRONE SWARM REACTS WITHOUT AN LLM\nIndependent feedback loops + shared trajectories + event-driven allocation", labelloc=t];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=12, margin="0.18,0.12", fillcolor="white", color="#cbd5e1"];
+  edge [fontname="Arial", fontsize=10, color="#64748b"];
+  task [label="SLOWER MISSION LOOP: FIELD / DISTRIBUTED ALLOCATOR\nSearch sectors + priority + aircraft capability\nEnergy-feasible assignment; reallocate on events", fillcolor="#ccfbf1"];
+  subgraph cluster_drone {
+    label="ON EACH OF THE 50 AIRCRAFT"; fontname="Arial"; fontsize=16; color="#7c3aed"; style=rounded; bgcolor="#faf5ff";
+    sensors [label="SENSORS\nIMU + GNSS + camera / depth\nVoltage + current + health"];
+    estimate [label="STATE ESTIMATION + PERCEPTION\nSensor fusion: position, velocity, orientation\nLocal obstacle map + detection uncertainty", fillcolor="#ede9fe"];
+    plan [label="LOCAL TRAJECTORY PLANNER\nReceding horizon: plan a short future path\nAvoid obstacles and predicted neighbor paths\nCheck dynamic limits; replan as inputs change", fillcolor="#ede9fe"];
+    control [label="FAST FLIGHT FEEDBACK LOOPS\nPosition -> velocity -> attitude -> angular rate\nTracking error -> controller -> motor allocation", fillcolor="#ddd6fe"];
+    motors [label="MOTORS MOVE AIRCRAFT\nMotion creates the next sensor measurements"];
+    guard [label="LOCAL SAFETY / ENERGY STATE MACHINE\nExecute / hold / recover / land as validated\nDeadlines, stale neighbors, battery and navigation", fillcolor="#fef3c7"];
+  }
+  neighbors [label="NEARBY AIRCRAFT OVER RADIO\nID + timestamp + position / velocity\nShort planned trajectory + uncertainty\nBounded messages, not raw video", fillcolor="#dbeafe"];
+  events [label="EVENTS TO MISSION LOOP\nTask progress + new detection\nBattery forecast + failure / unreachable state", fillcolor="#fee2e2"];
+  task -> plan [label="goal / search strip / constraints"];
+  sensors -> estimate -> plan -> control -> motors;
+  motors -> sensors [label="continuous feedback", constraint=false];
+  neighbors -> plan [label="received neighbor trajectories"];
+  plan -> neighbors [label="publish own trajectory", constraint=false];
+  estimate -> guard [label="health + energy + confidence"];
+  guard -> control [label="validated safety override", color="#b45309"];
+  guard -> events; estimate -> events [label="useful observation", constraint=false];
+  events -> task [label="trigger new assignment", constraint=false];
+}

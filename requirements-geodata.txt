@@ -1,0 +1,5 @@
+# Optional map regeneration tooling; not required to run prepared assets.
+rasterio==1.5.2
+pyproj==3.8.0
+s2sphere==0.2.5
+shapely==2.2.0
