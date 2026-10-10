@@ -49,9 +49,16 @@ class FakePorts:
         self.requests.append((capability, note))
         return "arq-1"
 
-    async def respond_agency_request(self, arid, action):
-        self.responses.append((arid, action))
-        return action
+    async def record_reply(self, arid, kind, text):
+        self.responses.append((arid, kind))
+        return kind
+
+    async def planned_assignments(self):
+        return [{"incident_id": "11111111-aaaa", "category": "person_stranded", "ward_id": "w-pc-01", "people": 3, "severity": 5,
+                 "lng": self.lng, "lat": self.lat,
+                 "resources": [{"id": "PC-BOAT-01", "kind": "boat", "agency": "pcmcfire", "lng": self.lng, "lat": self.lat, "eta_s": 300}]},
+                {"incident_id": "22222222-bbbb", "category": "unknown_report", "ward_id": "w-pc-01", "people": 1, "severity": 3,
+                 "lng": self.lng, "lat": self.lat, "resources": []}]
 
     async def agency_request_status(self, arid):
         return "pending"
@@ -79,8 +86,16 @@ class PureTests(unittest.TestCase):
 
     def test_classify_event(self):
         e = sa.classify_event({"id": "r:3", "status": "completed", "request_id": "q", "incident_id": "I1", "message": "m"})
-        self.assertEqual((e["kind"], e["agency_action"]), ("drone.completed", "fulfil"))
+        self.assertEqual((e["kind"], e["reply_kind"]), ("drone.completed", None))
         self.assertIsNone(sa.classify_event({"id": "r:4", "kind": "detect"}))
+
+    def test_reply_from_ack(self):
+        self.assertEqual(sa.reply_from_ack({"accepted": True, "reason": "accepted; aircraft assigned", "assigned_drones": ["D1"], "eta_s": 42})[0], "accept_full")
+        self.assertEqual(sa.reply_from_ack({"accepted": True, "reason": "accepted; aircraft queued"})[0], "delayed")
+        self.assertEqual(sa.reply_from_ack({"accepted": False, "reason": "outside the swarm's operating area"})[0], "decline_jurisdiction")
+        self.assertEqual(sa.reply_from_ack({"accepted": False, "reason": "swarm at capacity"})[0], "decline_capacity")
+        self.assertEqual(sa.reply_from_ack({"accepted": True, "reply_kind": "accept_partial"})[0], "accept_partial")
+        self.assertEqual(sa.reply_from_ack({}, ok=False)[0], "decline_capacity")
 
     def test_vulnerable(self):
         self.assertGreaterEqual(sa.vulnerable_count("elderly woman", 0.0, 4), 1)
@@ -118,7 +133,7 @@ class RoundTrip(unittest.IsolatedAsyncioTestCase):
             self.assertIn("drone.request_sent", kinds)
             self.assertTrue({"drone.accepted", "drone.declined"} & set(kinds))
             self.assertEqual(ports.requests[0][0], "aerial_assessment")
-            self.assertIn(ports.responses[0][1], ("acknowledge", "decline"))
+            self.assertIn(ports.responses[0][1], ("accept_full", "delayed", "decline_capacity", "decline_jurisdiction"))
             sent = next(e for e in ports.events if e[0] == "drone.request_sent")[2]
             self.assertEqual(sent["situation"]["available_ground_units"][0]["id"], "PC-BOAT-01")
             self.assertGreaterEqual(sent["situation"]["vulnerable"], 1)
@@ -153,7 +168,32 @@ class RoundTrip(unittest.IsolatedAsyncioTestCase):
         try:
             await agency.scan_once()
             self.assertTrue(any(e[0] == "drone.declined" for e in ports.events))   # ack ok=false is recorded as a decline
-            self.assertEqual(ports.responses[0][1], "decline")
+            self.assertEqual(ports.responses[0][1], "decline_capacity")
+        finally:
+            await ws.close()
+
+    async def test_orchestrated_mode_sends_incidents_only_and_survives_unknown_action(self):
+        ports = FakePorts()
+        agency = sa.SwarmAgency(url="x", token="t", ports=ports, orchestrate=True)
+        captured = []
+
+        async def fake_command(action, payload, timeout=8.0):
+            captured.append((action, payload))
+            return {"type": "ack", "ok": True, "result": {}}
+        agency.command = fake_command
+        self.assertEqual(await agency.orchestrate_once(), 1)         # unknown_report skipped
+        action, payload = captured[0]
+        self.assertEqual(action, "orchestrate_incident")
+        self.assertEqual(payload["external_id"], "11111111-aaaa")
+        self.assertEqual(payload["assignments"]["resources"][0]["id"], "PC-BOAT-01")
+        self.assertEqual(payload["assignments"]["drones"][0]["role"], "assess")
+        self.assertEqual(await agency.orchestrate_once(), 0)         # unchanged: not re-sent
+        # against the real server (no such action yet): rejected cleanly, then disabled
+        real, ws = await self.connected(FakePorts())
+        real.orchestrate = True
+        try:
+            self.assertEqual(await real.orchestrate_once(), 0)
+            self.assertTrue(real.orchestrate_disabled or real.orchestrated)
         finally:
             await ws.close()
 

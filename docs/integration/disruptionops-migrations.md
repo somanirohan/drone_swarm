@@ -170,7 +170,7 @@ on conflict do nothing;
 -- Optional, only for the dock_fire demo database: a dock as a base.
 -- insert into resources (...)   -- deliberately NOT included; see section 5, step C.
 commit;
--- Suggested file name: 030_swarm_taxonomy.sql (029 is taken upstream).
+-- Suggested file name: 040_drone_swarm_agency.sql (upstream now ends at 038).
 ```
 
 Cautions: (a) the `'drone'` kind appears in Copilot's `kinds_providing()` lists once inserted; (b) `person_stranded` needs `water_rescue` (boat, rescue_team, fire_engine), not an ambulance, so a medical case must not be mapped to it; (c) the `hazard_id` for `medical_emergency` is a required FK, not a claim that it is a flood (same reasoning as `unknown_report` in 018).
@@ -191,12 +191,12 @@ Reviewed (against 4e87ade, rechecked at bd21179: no file it depends on changed):
 | 8 | Idempotency table is reasonable (no unique key on `events` exists), but a retry whose first intake committed and ACK was lost relies on `citizen_reports.device_id` being stored by intake. **UNVERIFIED** that intake persists `device_id` in that column; `015` references it, so likely. | `operations.py` | Medium until tested. |
 | 9 | Tied to `city_id = 'pune'` (Literal) and `a.sim_run_id is null`. Resources are not scoped by `sim_run_id` (section 4), so a demo replan moves shared resource rows. The patch states this and demands a separate database; keep that. | `003`, patch header | Known limit. |
 | 10 | The older listener `drone/swarm.py` is already in the app and reads the **PyBullet** feed (`init`/`frame`/`log` messages at `/ws`). Pointing it at our `/ops/ws` would connect (or fail the handshake on `/ws`) and then ignore every `snapshot` message. Do not use both. | `swarm.py` `handle()`, `operations_server.http()` | Conflict to resolve. |
-| 0 | **Its migration number 029 is now taken** by upstream `029_pcmc_pccoe_zone.sql`. Rename to 030 (section 9). | `bd21179` | **High (blocking)** |
+| 0 | **Its migration number 029 is now taken** by upstream `029_pcmc_pccoe_zone.sql`. Superseded: our patch is now 039/040 (upstream ends at 038). | `bd21179` | **High (blocking)** |
 | 11 | `029` itself is syntactically consistent with the real schema: FK targets `cities(id)` (text), `incidents(id)` (uuid, per 021), `resources(id)` (text, per 021 and 026) match; RLS and revokes match 014/020+. No error found in the SQL. | `021`, `026` | OK. |
 
 ## 9. Collision and consequences of migration 029 (bd21179)
 
-1. **Number collision.** The earlier patch file `integrations/disruptionops_patch/backend/migrations/029_swarm_operations_demo.sql` now collides with upstream `029_pcmc_pccoe_zone.sql`. The next free number is **030**. Rename before anything is copied. (Done: the file is now `swarm_ops/integrations/disruptionops_patch/backend/migrations/030_swarm_operations_demo.sql`.) (Repo numbers differ from Supabase history anyway, see section 0.) Order matters: 029 must be applied first, because the idempotency table has no dependency on it but any swarm test uses PCMC wards.
+1. **Number collision.** The earlier patch file `integrations/disruptionops_patch/backend/migrations/029_swarm_operations_demo.sql` now collides with upstream `029_pcmc_pccoe_zone.sql`. Upstream now ends at 038; ours are **039** and **040**. Rename before anything is copied. (Done: the file is now `swarm_ops/integrations/disruptionops_patch/backend/migrations/030_swarm_operations_demo.sql`.) (Repo numbers differ from Supabase history anyway, see section 0.) Order matters: 029 must be applied first, because the idempotency table has no dependency on it but any swarm test uses PCMC wards.
 2. **Catalog.** `assets/operations/agency-catalog.json` is generated from 029: 32 `PC-*` ids with real coordinates. Distance from our anchor (computed from the SQL coordinates, flat-earth approximation): `PC-TRUCK-01` 6 m (PCCOE staging), `PC-PUMP-01` 511 m, `PC-AMB-06` 887 m; the next nearest are 1.2 km (`PC-AMB-04`, `PC-TEAM-02`, `PC-FIRE-01`); the farthest is 7.9 km. So 2 units are inside 600 m, 3 inside 1.2 km, and the other 29 are 1.2-7.9 km away. Consequence: with the real fleet most ground units start off the 1.2 km map and need an off-map approach (travel time before they appear), and the engine must label them as such rather than teleporting them.
 3. **The old docs' statements to correct.** "Upstream has no generic medical-emergency category" is still true, but "unknown_report has no needs" is false (023). The mapping table below replaces them.
 4. **Categories, verified.**
@@ -220,3 +220,14 @@ Reviewed (against 4e87ade, rechecked at bd21179: no file it depends on changed):
 - Whether the hosted database has applied 027-029 (the migrations README table still stops at 026 at bd21179).
 - How the live Copilot and Commander react to `drone.*` event kinds (not read).
 - End-to-end behaviour: nothing here was run against a database.
+
+## 10. Upstream f7ca6d8: migrations 037 and 038 (added after this document was first written)
+
+| Migration | What it changes | Effect on the swarm |
+|---|---|---|
+| `037_hold_unclassified_reports.sql` | `citizen_reports.source` check adds `sensor`, `phone`, `sim`; closes every open `unknown_report` incident (reports go back to the inbox, needs and assignments removed, event `incident.resolved` by `system:migration-037`). With `incidents/intake.py`, a report nothing can classify is now HELD with no incident until an officer calls `POST /reports/{id}/classify` (`intake.classify_held`). | Only incidents exist to be sent; a held report must never be sent as an `agency_request`. `unknown_report`/`field_assessment` incidents no longer appear, so the `assess` request kind is rare. |
+| `038_agency_replies.sql` | `agency_requests` gains `reply`, `reply_kind`, `next_step`, `replies jsonb`, `reply_due_at`, `followup_of`, `units text[]`. | The swarm is an agency, so its ack becomes the reply. |
+
+`ops/agency_replies.py`: every new `agency_requests` row gets `reply_due_at` (3-12 sim minutes) and is answered at random from `REPLY_SET`: `accept_full`, `accept_partial`, `delayed` (life-safety capabilities also hedge to a second agency), `need_info`, `decline_capacity`, `decline_jurisdiction`. The coordinator then stages `AID-` units and re-plans, asks the next agency, or escalates to the EOC. Events: `agency.replied`, `agency.requested` (with `followup_of`), `agency.clarified`, `agency.escalated`. `record()` is the door for a real answer; it demotes an acceptance to a decline when the agency has no units.
+
+Consequence for our patch: a request to `drone-swarm` would be answered at random and an honest acceptance demoted. `backend/patches/agency_replies_external_agencies.diff` marks `drone-swarm` as an external agency (no random reply, no staged units). `swarm_agency.py` then maps the swarm ack to `agency_replies.record(...)`. Our patch migrations are `039_swarm_operations_demo.sql` and `040_drone_swarm_agency.sql`. Taxonomy is unchanged by 037/038 (same 5/12/11/16/11/20 counts); the PCMC catalog (029) is unchanged, regenerated only to record commit f7ca6d8.

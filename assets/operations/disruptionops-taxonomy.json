@@ -1,10 +1,10 @@
 {
  "source": {
   "repo": "https://github.com/officialayush23/DisruptionOps",
-  "commit": "1697407df41d77ff741aec6b4ad4e489a04a4f9e",
-  "migrations": "001_portability_taxonomy_as_data.sql..036_realtime_reports.sql",
-  "migration_count": 36,
-  "migrations_sha256": "e06c788da2d0de41d807cf74eaf877e32222378bb202098c576095f08705c883",
+  "commit": "f7ca6d8321b9be73f903defa3258d72557a31ce1",
+  "migrations": "001_portability_taxonomy_as_data.sql..038_agency_replies.sql",
+  "migration_count": 38,
+  "migrations_sha256": "bac027c276cb5de015b3aa87e96ca7e981ae805356317d97508079483c44d8a4",
   "note": "Derived read-only from DisruptionOps backend/migrations; regenerate with tools/build_taxonomy.py."
  },
  "hazard_types": [

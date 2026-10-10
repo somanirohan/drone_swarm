@@ -17,4 +17,7 @@ Set `DISRUPTIONOPS_URL` (and `DISRUPTIONOPS_TOKEN`). `swarm_ops.disruptionops_cl
 Router prefix `/api/v1`: `main.py:156`. Bearer verification: `core/security.py:111-132`. Responses are camelCase (`schemas/domain.py` `Camel`). Known gaps: the taxonomy API omits per-kind `effectiveness` (`domain.py:422`), so it is merged from the asset (default 1.0); keywords arrive as `{phrase: weight}`; resources lack `agency_id`, taken from the asset catalog or matched by operator name. Only ids starting `w-pc-`, `lf-pc-`, `PC-` are used.
 
 ## Aerial capability decision
-No `drone` resource kind: `agents/replan.py:933` (`_air_matrix`) skips kind `drone`, so the solver would route it on roads. The swarm is the `drone-swarm` agency (migration 038) reached through `/agency-requests` (`api/v1/reports.py:281`).
+No `drone` resource kind: `agents/replan.py:933` (`_air_matrix`) skips kind `drone`, so the solver would route it on roads. The swarm is the `drone-swarm` agency (migration 040) reached through `/agency-requests` (`api/v1/reports.py:281`).
+
+## Upstream f7ca6d8 (migrations 001-038)
+`disruptionops-taxonomy.json` is regenerated at f7ca6d8; 037 (held unclassified reports) and 038 (agency replies) add no taxonomy rows. Behavioural changes that matter: `GET /incidents` no longer lists `unknown_report` incidents; `agency_requests` carry `reply_kind`/`replies`/`units` (`ops/agency_replies.py`). See `disruptionops-migrations.md` section 10.

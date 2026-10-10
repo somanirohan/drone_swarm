@@ -11,7 +11,7 @@ drone_swarm/
   operations_server.py      SHIM -> swarm_ops.server (`python operations_server.py --port N --fleet N` still works)
   swarm_ops/                __init__.py  engine.py  server.py
     integrations/           disruptionops_bridge.py  requirements-tests.txt
-                            disruptionops_patch/backend/{app/drone/operations.py, migrations/030_swarm_operations_demo.sql}
+                            disruptionops_patch/backend/{app/drone/operations.py, migrations/039_swarm_operations_demo.sql}
   web/                      ops/ (operations.html/.css/.js)  legacy/ (index.html)  vendor/ (three.js)
   assets/                   operations/  legacy/ (city-ready/, apocalyptic-city/, CITY-SOURCE.md)
   scripts/                  run-operations.ps1  share-with-friend.ps1  setup-ops.ps1

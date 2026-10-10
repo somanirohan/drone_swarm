@@ -186,7 +186,7 @@ Notes:
 | `flood` (people on a roof) | `person_stranded` | `water_rescue` (boat 1.0, rescue_team 0.8, fire_engine 0.6) | exists |
 | `trapped` (rubble) | `person_stranded`; use `structural_damage` (need `search_rescue`) when a collapse is seen | `water_rescue` or `search_rescue` | exists; choose by cause |
 | `fire` | `fire` | `fire_suppression` + `medical_transport` | exists (018) |
-| `medical` | `medical_emergency` | `medical_transport` | **needs the seed in the migrations doc (file 030)**; until then `unknown_report` (one `field_assessment` responder, not an ambulance) or `heat_casualty` (gives `medical_transport` but is a heat hazard; acceptable only for a demo with a note) |
+| `medical` | `medical_emergency` | `medical_transport` | **needs the seed in the migrations doc (file 040 or the migrations doc)**; until then `unknown_report` (one `field_assessment` responder, not an ambulance) or `heat_casualty` (gives `medical_transport` but is a heat hazard; acceptable only for a demo with a note) |
 | `blocked_route` (damaged crossing) | `road_blocks` row + event `road.blocked`; add `structural_damage` if people are at risk. `flooded_road` (pump) only if the crossing is flooded; `fallen_tree` (debris clearance) only if debris | route avoidance by router | exists as mechanism (used by the old listener) |
 | unknown sighting | `unknown_report` | `field_assessment` (023) | exists |
 | People who look heat-affected | `heat_casualty` only if real heat context | `medical_transport` | exists; **do not** use for generic medical |
@@ -236,7 +236,7 @@ Pausing is an in-memory flag in DisruptionOps with a persisted copy; if Disrupti
 - Swarm `run_id` is a fresh UUID every scenario start or reset. Local ids (`I001`, `D01`, `R01`) repeat between runs, so every message carries `run_id`.
 - DisruptionOps: either leave `sim_run_id` NULL in a separate demo database (what the earlier patch does) or create a `sim_runs` row per swarm run (`scenario_key` = scenario id, `seed` = seed, `mode='sim'`) and write events through a SimClock so they carry `sim_run_id`. Shared `resources` rows are not scoped (migrations doc, section 4), so use a separate database in both cases.
 - Idempotency: every outbound item has `<run_id>:<seq>`; DisruptionOps stores the key (the earlier patch's `swarm_operations_events` table is a reasonable shape) and returns the original response for a repeat. Same key with a different body is rejected with 409.
-- The old patch's migration name `029_swarm_operations_demo.sql` collides with upstream 029; use 030 (renamed in this repository: `swarm_ops/integrations/.../030_swarm_operations_demo.sql`).
+- The old patch's migration name `029_swarm_operations_demo.sql` collides with upstream 029; use 039 (current upstream goes to 038; our patch is `039_swarm_operations_demo.sql` and `040_drone_swarm_agency.sql`).
 - Dedup of sightings uses the intake's category radius/window (e.g. `person_stranded` 150 m / 15 min). The swarm must not re-file a site inside that window.
 
 ## 8. Authentication
@@ -319,7 +319,7 @@ digraph call_sequence {
 
 ## 12. Open questions for the lead
 
-0. Rename the patch migration to 030 and regenerate the catalog after any upstream change (it is derived from 029).
+0. Rename the patch migration to 039 and regenerate the catalog after any upstream change (it is derived from 029).
 
 1. Option A or Option B for requests? (Recommendation: B.)
 2. Does the user accept a gateway-key read endpoint for autonomy status added in DisruptionOps? (The user said DisruptionOps is "already done"; this contract therefore keeps DisruptionOps changes to data rows and one optional endpoint.)

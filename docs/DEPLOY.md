@@ -35,5 +35,5 @@ Operators on a public URL open `https://<service>.onrender.com/#control=<OPS_CON
 ## Connecting DisruptionOps
 - WebSocket URL: `wss://<service>.onrender.com/ops/ws?token=<OPS_INTEGRATION_TOKEN>`.
 - Swarm side: `OPS_INTEGRATION_TOKEN`, optionally `DISRUPTIONOPS_URL` / `DISRUPTIONOPS_TOKEN` (reads taxonomy, wards, lifelines, units, incidents).
-- DisruptionOps side (patch in `swarm_ops/integrations/disruptionops_patch/`, apply migration 038): `SWARM_AGENCY=1`, `SWARM_WS_URL=wss://<service>/ops/ws`, `SWARM_INTEGRATION_TOKEN=<same value>`.
+- DisruptionOps side (patch in `swarm_ops/integrations/disruptionops_patch/`, apply migration 040): `SWARM_AGENCY=1`, `SWARM_WS_URL=wss://<service>/ops/ws`, `SWARM_INTEGRATION_TOKEN=<same value>`.
 - Protocol: `docs/integration/how-disruptionops-calls-the-swarm.md`.

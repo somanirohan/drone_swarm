@@ -46,7 +46,7 @@ class AssetTests(unittest.TestCase):
         c = self.data["counts"]
         self.assertEqual((c["hazard_types"], c["capabilities"], c["resource_kinds"], c["incident_categories"],
                           c["lifeline_kinds"], c["agencies"]), (5, 12, 11, 16, 11, 20))
-        self.assertEqual(self.data["source"]["migration_count"], 36)
+        self.assertEqual(self.data["source"]["migration_count"], 38)
         self.assertRegex(self.data["source"]["commit"], r"^[0-9a-f]{40}$")
 
     def test_later_migrations_are_honoured(self):

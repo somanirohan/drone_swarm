@@ -1,7 +1,7 @@
 """DisruptionOps -> drone swarm: ask the swarm (an external agency) for aerial help and ingest what it reports.
 
-PATCH PROPOSAL for DisruptionOps 1697407 (migrations 001-036). Not applied to any DisruptionOps checkout.
-Apply with migration 038_drone_swarm_agency.sql (registers the 'drone-swarm' agency and the capabilities
+PATCH PROPOSAL for DisruptionOps f7ca6d8 (migrations 001-038). Not applied to any DisruptionOps checkout.
+Apply with migration 040_drone_swarm_agency.sql (registers the 'drone-swarm' agency and the capabilities
 aerial_assessment / supply_drop / relay as data) and the two-line hook in main.py described in README.md.
 
 What it does
@@ -18,7 +18,8 @@ What it does
 2. It reads the swarm's status events (accepted / declined / briefing / resource_request / supply_delivered /
    completed ...) from the same socket and writes them back ONLY through doors that already exist:
      * ``world.events.append``                 an audit event ``drone.<status>`` on the incident
-     * ``reports.respond_to_agency_request``   acknowledge / decline / fulfil the agency request
+     * ``agency_replies.record``               the swarm's ack becomes the agency's reply (accept_full / delayed /
+                                              decline_capacity / decline_jurisdiction), not the random REPLY_SET
      * ``incidents.intake.receive(source='sensor')``  for a swarm ``resource_request`` the swarm saw on scene
        (trust, dedup, needs-from-words and the allocator take it from there; the CP-SAT planner still picks units)
    It never writes tables directly, never resolves an incident (a person does that) and never assigns a unit.
@@ -34,6 +35,7 @@ Environment (all optional; ``SWARM_AGENCY=1`` switches it on):
     SWARM_INTEGRATION_TOKEN  the swarm's OPS_INTEGRATION_TOKEN (never logged)
     SWARM_ANCHOR             "lat,lon" of the swarm map origin   (default 18.6526632,73.7624378, PCCOE)
     SWARM_SCAN_S             scan period seconds (default 10)
+    SWARM_ORCHESTRATE        1 to also push planner assignments to the swarm (orchestrate_incident)
     SWARM_MAX_OPEN           most unanswered requests at once (default 6)
 
 Everything here imports ``app.*`` lazily, so the pure helpers can be unit-tested without a DisruptionOps checkout.
@@ -57,10 +59,11 @@ SCAN_S = float(os.environ.get("SWARM_SCAN_S", "10"))
 MAX_OPEN = int(os.environ.get("SWARM_MAX_OPEN", "6"))
 PROTOCOL = "disruptionops.swarm.v2"
 
-#: swarm status -> (event kind we record, agency_request action or None)
+#: swarm status -> (event kind we record, agency reply kind or None). Reply kinds are DisruptionOps' own
+#: (ops/agency_replies.py REPLY_SET): the swarm is one of the agencies, so its answer replaces the random reply.
 STATUS_MAP = {
-    "accepted": ("drone.accepted", "acknowledge"),
-    "declined": ("drone.declined", "decline"),
+    "accepted": ("drone.accepted", "accept_full"),
+    "declined": ("drone.declined", None),            # decline kind comes from the reason, see reply_from_ack()
     "launched": ("drone.launched", None),
     "on_scene": ("drone.on_scene", None),
     "briefing": ("drone.briefing", None),
@@ -71,8 +74,11 @@ STATUS_MAP = {
     "retasked": ("drone.retasked", None),
     "recalled": ("drone.recalled", None),
     "handed_over": ("drone.handed_over", None),
-    "completed": ("drone.completed", "fulfil"),
+    "completed": ("drone.completed", None),
 }
+REPLY_KINDS = {"accept_full", "accept_partial", "delayed", "need_info", "decline_capacity", "decline_jurisdiction"}
+#: statuses that turn an earlier "delayed" (queued) reply into a firm acceptance
+FIRM_STATUSES = {"launched", "on_scene", "briefing", "supply_delivered", "ground_arrived", "handed_over", "completed"}
 #: swarm needed_kind -> words intake's EXTRA_NEEDS (incidents/intake.py:321) turns into a need, or None
 KIND_WORDS = {"ambulance": "injured person, needs an ambulance", "rescue": "people trapped, needs a rescue team",
               "bus": None, "boat": None}
@@ -151,6 +157,26 @@ def build_payload(ctx: dict, anchor: tuple[float, float] = ANCHOR) -> dict:
     }
 
 
+def reply_from_ack(result: dict, ok: bool = True) -> tuple[str, str]:
+    """Swarm ack -> (agency reply kind, text). Uses result['reply_kind'] when the swarm provides one."""
+    reason = str(result.get("reason") or "")
+    drones = result.get("assigned_drones") or []
+    given = result.get("reply_kind")
+    if given in REPLY_KINDS:
+        kind = given
+    elif not ok or not result.get("accepted"):
+        kind = "decline_jurisdiction" if "operating area" in reason or "no-fly" in reason else "decline_capacity"
+    elif "queued" in reason:
+        kind = "delayed"
+    else:
+        kind = "accept_full"
+    eta = result.get("eta_s")
+    text = f"Drone swarm: {reason or kind}."
+    if drones:
+        text += f" Aircraft {', '.join(map(str, drones))}" + (f", ETA {round(eta)} s." if eta else ".")
+    return kind, text[:400]
+
+
 def classify_event(event: dict) -> dict | None:
     """One swarm status event -> what to record. Ignores anything without a machine-readable status."""
     status = event.get("status")
@@ -158,7 +184,7 @@ def classify_event(event: dict) -> dict | None:
         return None
     kind, action = STATUS_MAP[status]
     data = event.get("data") or {}
-    return {"swarm_event_id": str(event.get("id")), "status": status, "kind": kind, "agency_action": action,
+    return {"swarm_event_id": str(event.get("id")), "status": status, "kind": kind, "reply_kind": action,
             "request_id": event.get("request_id") or data.get("request_id"), "swarm_incident_id": event.get("incident_id"),
             "message": event.get("message", ""), "data": data, "time": event.get("time")}
 
@@ -241,22 +267,49 @@ class AppPorts:
 
     async def open_agency_request(self, incident_id: str | None, ward_id: str | None, capability: str, quantity: int, note: str) -> str | None:
         from app.api.v1 import reports
+        from app.db import session as db
         out = await reports.request_agency(
             reports.AgencyRequestIn(incident_id=incident_id, ward_id=ward_id, to_agency="drone-swarm"
                                     if capability in ("aerial_assessment", "supply_drop", "relay") else "pmc",
                                     capability_id=capability, quantity=quantity, note=note[:500]),
             self._principal())
+        if capability in ("aerial_assessment", "supply_drop", "relay"):
+            # request_agency() schedules the random REPLY_SET answer; the swarm answers over its own socket instead.
+            await db.execute("update agency_requests set reply_due_at = null where id = $1::uuid", out.id)
         return out.id
 
-    async def respond_agency_request(self, agency_request_id: str, action: str) -> str | None:
-        """Returns the resulting status, or the human-set terminal status that stopped us (never overrides it)."""
-        from app.api.v1 import reports
-        from app.core.errors import Conflict
-        try:
-            out = await reports.respond_to_agency_request(agency_request_id, action, self._principal())
-            return out.status
-        except Conflict as exc:
-            return str(exc)
+    async def record_reply(self, agency_request_id: str, kind: str, text: str) -> str | None:
+        """The swarm's answer, through DisruptionOps' own door (ops/agency_replies.record), then stop the random replier.
+
+        Needs patches/agency_replies_external_agencies.diff so 'drone-swarm' is an external agency (accepting stages
+        no AID- units and is not demoted to a decline).
+        """
+        from app.db import session as db
+        from app.ops import agency_replies
+        out = await agency_replies.record(agency_request_id, kind, text, by="Drone swarm")
+        await db.execute("update agency_requests set reply_due_at = null where id = $1::uuid", agency_request_id)
+        return out.get("status")
+
+    async def planned_assignments(self) -> list[dict]:
+        """Incidents with live planner assignments (ground units the CP-SAT planner chose), for orchestrated mode."""
+        from app.db import session as db
+        rows = await db.fetch(
+            """
+            select i.id::text as incident_id, i.category, i.ward_id, i.report_count, i.severity,
+                   extensions.ST_X(i.location::extensions.geometry) as lng, extensions.ST_Y(i.location::extensions.geometry) as lat,
+                   r.id as rid, r.kind, r.agency_id, a.eta_minutes,
+                   extensions.ST_X(r.location::extensions.geometry) as rlng, extensions.ST_Y(r.location::extensions.geometry) as rlat
+              from assignments a join incidents i on i.id = a.incident_id join resources r on r.id = a.resource_id
+             where a.status::text not in ('complete','cancelled') and i.status <> 'resolved' and i.city_id = $1
+            """, self.city_id)
+        by: dict[str, dict] = {}
+        for r in rows:
+            d = by.setdefault(r["incident_id"], {"incident_id": r["incident_id"], "category": r["category"], "ward_id": r["ward_id"],
+                                                 "people": r["report_count"], "severity": r["severity"], "lng": r["lng"],
+                                                 "lat": r["lat"], "resources": []})
+            d["resources"].append({"id": r["rid"], "kind": r["kind"], "agency": r["agency_id"], "lng": r["rlng"], "lat": r["rlat"],
+                                   "eta_s": int((r["eta_minutes"] or 0) * 60) or None})
+        return list(by.values())
 
     async def agency_request_status(self, agency_request_id: str) -> str | None:
         from app.db import session as db
@@ -288,6 +341,9 @@ class SwarmAgency:
     _ws: Any = None
     _pending: dict = field(default_factory=dict)
     _primed: bool = False
+    orchestrate: bool = False
+    orchestrate_disabled: bool = False
+    orchestrated: dict = field(default_factory=dict)
     _done: set = field(default_factory=set)
 
     def __post_init__(self):
@@ -359,10 +415,55 @@ class SwarmAgency:
         status = "accepted" if result.get("accepted") else "declined"
         info["answered"] = True
         info["swarm_incident_id"] = result.get("incident_id")
+        kind, text = reply_from_ack(result, ok=bool(ack.get("ok")))
         await self._ingest({"swarm_event_id": f"ack:{rid}", "status": status, "kind": STATUS_MAP[status][0],
-                            "agency_action": STATUS_MAP[status][1], "request_id": rid,
-                            "swarm_incident_id": result.get("incident_id"), "message": result.get("reason", ""),
-                            "data": {k: result.get(k) for k in ("reason", "eta_s", "assigned_drones", "plan", "merged")}, "time": None})
+                            "reply_kind": kind, "request_id": rid, "swarm_incident_id": result.get("incident_id"),
+                            "message": text, "data": {k: result.get(k) for k in ("reason", "eta_s", "assigned_drones", "plan", "merged")},
+                            "time": None})
+
+    # --- orchestrated mode ---------------------------------------------------------
+    async def orchestrate_once(self) -> int:
+        """DisruptionOps' planner chose ground units for an incident: tell the swarm so it shows (and briefs) them.
+
+        Only incidents are sent (held, unclassified reports never are). Re-sent only when the assignment set changes.
+        Disables itself if the swarm does not know the action.
+        """
+        if self.orchestrate_disabled or self.ports.autonomy_paused():
+            return 0
+        sent = 0
+        for d in await self.ports.planned_assignments():
+            if d["category"] == "unknown_report":
+                continue
+            signature = json.dumps(sorted((r["id"], r.get("eta_s")) for r in d["resources"]))
+            if self.orchestrated.get(d["incident_id"]) == signature:
+                continue
+            ref = f"dops-orch-{d['incident_id']}"[:128]
+            drones = [{"count": 1, "role": "supply" if d["category"] == "supply_shortage" else "assess", "payload": []}]
+            payload = {
+                "request_id": ref, "external_id": d["incident_id"], "position": to_local(d["lng"], d["lat"], self.anchor),
+                "category": d["category"], "people": max(1, d.get("people") or 1),
+                "situation": {"severity": d.get("severity"), "ward_id": d.get("ward_id")},
+                "assignments": {"drones": drones, "resources": [
+                    {"id": r["id"], "kind": r["kind"], "agency": r.get("agency"),
+                     "position": to_local(r["lng"], r["lat"], self.anchor) if r.get("lng") is not None else None,
+                     "eta_s": r.get("eta_s")} for r in d["resources"]]}}
+            try:
+                ack = await self.command("orchestrate_incident", payload)
+            except (ConnectionError, asyncio.TimeoutError) as exc:
+                self.last_error = f"orchestrate send failed: {type(exc).__name__}"
+                break
+            if not ack.get("ok"):
+                self.last_error = f"orchestrate rejected: {ack.get('error')}"
+                if "Unknown action" in str(ack.get("error")):
+                    self.orchestrate_disabled = True
+                    break
+                continue
+            self.orchestrated[d["incident_id"]] = signature
+            sent += 1
+            await self.ports.record("drone.orchestrated", d["incident_id"], d.get("ward_id"),
+                                    {"request_id": ref, "resources": [r["id"] for r in d["resources"]]})
+            await asyncio.sleep(0.15)
+        return sent
 
     # --- ingesting ---------------------------------------------------------------
     async def on_snapshot(self, packet: dict) -> None:
@@ -395,8 +496,13 @@ class SwarmAgency:
         payload = {"request_id": ev["request_id"], "swarm_event_id": ev["swarm_event_id"], "status": ev["status"],
                    "message": ev["message"], "data": ev["data"], "simulation_only": True}
         await self.ports.record(ev["kind"], info["incident_id"], info["ward_id"], payload)
-        if ev["agency_action"] and info.get("agency_request_id"):
-            await self.ports.respond_agency_request(info["agency_request_id"], ev["agency_action"])
+        reply = ev.get("reply_kind")
+        if not reply and info.get("reply") == "delayed" and ev["status"] in FIRM_STATUSES:
+            reply, ev["message"] = "accept_full", "Drone swarm: aircraft airborne; the queued request is now firm."
+        final = ("accept_full", "decline_capacity", "decline_jurisdiction")
+        if reply and info.get("agency_request_id") and info.get("reply") != reply and info.get("reply") not in final:
+            info["reply"] = reply
+            await self.ports.record_reply(info["agency_request_id"], reply, ev["message"])
         if ev["status"] == "resource_request":
             await self._resource_request(ev, info)
 
@@ -459,6 +565,8 @@ class SwarmAgency:
                         while not reader.done():
                             try:
                                 await self.scan_once()
+                                if self.orchestrate:
+                                    await self.orchestrate_once()
                             except Exception as exc:    # noqa: BLE001 - one bad incident must not drop the socket
                                 self.last_error = f"scan: {type(exc).__name__}: {str(exc)[:120]}"
                             await asyncio.sleep(SCAN_S)
@@ -494,7 +602,8 @@ async def start() -> None:
     if not enabled() or _task:
         return
     _agency = SwarmAgency(url=os.environ["SWARM_WS_URL"], token=os.environ.get("SWARM_INTEGRATION_TOKEN", ""),
-                          anchor=parse_anchor(os.environ.get("SWARM_ANCHOR")))
+                          anchor=parse_anchor(os.environ.get("SWARM_ANCHOR")),
+                          orchestrate=os.environ.get("SWARM_ORCHESTRATE", "0").lower() in ("1", "true", "yes", "on"))
     _task = asyncio.create_task(_agency.run())
 
 
