@@ -42,7 +42,9 @@ import random
 import uuid
 from pathlib import Path
 
+from swarm_ops.agents import DecisionLog, DroneAgent, MessageBus, SwarmCoordinator
 from swarm_ops.planning import FlightPlanner
+from swarm_ops.traffic import Traffic
 
 
 ANCHOR = [18.6526632, 73.7624378]
@@ -100,6 +102,8 @@ RESOURCE_KINDS = {
     "water_tanker": {"transport": "road", "agency": "PCMC water supply", "capacity": 1, "model": "water_tanker", "carries_people": False},
     "supply_truck": {"transport": "road", "agency": "District relief", "capacity": 1, "model": "supply_truck", "carries_people": False},
     "bus": {"transport": "road", "agency": "PMPML", "capacity": 40, "model": "bus", "carries_people": True},
+    # Dispatched only when a plan asks for it (taxonomy capability traffic_control); no template requires it.
+    "police": {"transport": "road", "agency": "Police", "capacity": 4, "model": "police", "carries_people": False},
 }
 RESOURCE_ALIASES = {"rescue_team": "rescue", "jcb": "engineering"}
 # A required kind may also be served by these kinds (exact kind preferred).
@@ -166,8 +170,27 @@ def _carries_people(resource):
     return resource.get("transport") == "boat" or RESOURCE_KINDS.get(resource.get("kind"), {}).get("carries_people", False)
 
 
+_REFERENCE = {}
+
+
+def reference_data():
+    """Taxonomy + unit catalog + lifelines via swarm_ops.disruptionops_client.load_reference_data
+    (live DisruptionOps API when configured, else the SQL-derived assets). Loaded once per process."""
+    if not _REFERENCE:
+        try:
+            from swarm_ops.disruptionops_client import load_reference_data
+            value = load_reference_data()
+        except Exception as error:  # never block the simulation on reference data
+            value = {"mode": "builtin", "taxonomy": {}, "catalog": {}, "errors": [f"{type(error).__name__}: {error}"[:160]]}
+        _REFERENCE.update(value)
+    return _REFERENCE
+
+
 def _agency_catalog():
     """PCMC/PCCOE units and lifelines migrated read-only from DisruptionOps (029_pcmc_pccoe_zone)."""
+    catalog = reference_data().get("catalog")
+    if isinstance(catalog, dict) and catalog.get("resources"):
+        return catalog
     try:
         return json.loads(CATALOG_PATH.read_text(encoding="utf8"))
     except (OSError, ValueError):
@@ -272,6 +295,9 @@ class OperationsSimulation:
         self._station_nodes = None
         self._event_seq = 0
         self._faults = 0
+        clock=lambda:self.t
+        self.bus = MessageBus(clock)
+        self.decisions = DecisionLog(clock)
         self.external_ground = False
         self._last_allocate = -10
         self.flood={"enabled":True,"width":float(self.world.get("river_width",45))+90,"level":2.1,"synthetic":True,"model":"river corridor; prescribed depth, not hydrodynamics"}
@@ -279,7 +305,11 @@ class OperationsSimulation:
         self._setup_search()
         self._base = list(self.world.get("bases", [{"position": [-440,-440,0]}])[0]["position"])
         self._base = (self._base + [0,0,0])[:3]
-        self.scenario = {"id": scenario, "name": spec["name"], "description": spec["description"], "seed": self.seed, "world_id": self.world_id}
+        mode = reference_data().get("mode", "assets")
+        self.scenario = {"id": scenario, "name": spec["name"], "description": spec["description"], "seed": self.seed, "world_id": self.world_id,
+                         "data_source": "live" if mode == "live" else "assets", "data_mode": mode}
+        # Command-centre autonomy switch (command "control"): paused = no new launches/requests.
+        self.control = {"autonomy": "running", "reason": None, "since": 0.0, "by": None}
         self.docks = []
         self.dispatch_cap = None  # builders may set {"per_incident": n, "total": m}
         self.drones = []
@@ -301,6 +331,8 @@ class OperationsSimulation:
             if i==2:
                 staging=self._river_projection(self._base)
                 if staging:self.resources[-1]["position"]=[*staging[1],self.flood["level"]]
+        self.agents = {d["id"]: DroneAgent(d, self.bus, self.decisions) for d in self.drones}
+        self.coordinator = SwarmCoordinator(self, self.bus, self.decisions)
         self._build_roads()
         for resource in self.resources:
             # A staging slot that falls inside a mapped footprint moves to the nearest road point.
@@ -310,6 +342,8 @@ class OperationsSimulation:
         self._create_scenario(scenario)
         if self.docks:self._event("scenario", f"{self.scenario['name']} started; {self.fleet_size} drones docked at {len(self.docks)} stations, launch cap {self._cap_total()}.")
         else:self._event("scenario", f"{self.scenario['name']} started; {self.fleet_size} drones ready.")
+        self.traffic = Traffic(self, count=self.traffic_vehicles, seed=self.seed)
+        self._replan("scenario start")
         self._allocate()
 
     def _building_index(self):
@@ -530,6 +564,177 @@ class OperationsSimulation:
         cap=getattr(self,"dispatch_cap",None)
         return int(cap.get("per_incident",DOCK_DISPATCH_CAP)) if isinstance(cap,dict) else DOCK_DISPATCH_CAP
 
+    STANDOFF_M=STANDOFF_M
+    traffic_vehicles=60  # civilian vehicles (<= 80); set on the instance/class before (re)initialising
+
+    def _paused(self):
+        return getattr(self,"control",{}).get("autonomy")=="paused"
+
+    @property
+    def RESOURCE_KIND_NAMES(self):
+        return tuple(RESOURCE_KINDS)
+
+    def _known_kinds(self):
+        """Unit kinds the swarm can obtain: on the map now, or via PCMC mutual aid (catalog)."""
+        kinds={r["kind"] for r in self.resources}
+        if not self.external_ground:kinds|=set(CATALOG_KINDS.values())
+        return kinds
+
+    # ---- situation -> plan (SwarmCoordinator.plan_response) ----
+    def _situation(self,incident):
+        """Evidence-rich picture of one incident for the response planner (also in the snapshot)."""
+        p=incident["position"];t=self.t
+        evidence=incident.get("evidence") or []
+        hazards=list(dict.fromkeys(list((incident["briefing"] or {}).get("hazards") or HAZARDS.get(incident["category"],[]))+list(incident.get("hazards_reported") or [])))
+        building=next((b for b in self._building_index() if b[0]==incident.get("building_id")),None) if incident.get("building_id") else None
+        if building:
+            pts=building[2];area=abs(sum(pts[i][0]*pts[(i+1)%len(pts)][1]-pts[(i+1)%len(pts)][0]*pts[i][1] for i in range(len(pts))))/2
+        else:area=400.0
+        counts=[e.get("people") for e in evidence if isinstance(e.get("people"),(int,float))]
+        if incident.get("trend"):trend=incident["trend"]
+        elif incident["evacuated_people"]>0:trend="improving"
+        elif len(counts)>=2 and counts[-1]>counts[0]:trend="worsening"
+        elif counts:trend="stable"
+        else:trend="unknown"
+        lifelines=[]
+        for item in (self.world.get("lifelines") or self._lifelines or [])+[{"kind":b.get("kind"),"source_id":b.get("id"),"local_xy":b["position"][:2],"name":b.get("id")} for b in self.world.get("bases",[])+self.world.get("shelters",[]) if b.get("kind") in ("hospital","shelter")]:
+            xy=item.get("local_xy") or (item.get("position") or [None,None])[:2]
+            if not xy or xy[0] is None:continue
+            lifelines.append({"id":item.get("source_id") or item.get("id"),"kind":item.get("kind"),"name":item.get("name"),"distance_m":round(_distance(xy,p[:2]),1),"capacity":item.get("capacity")})
+        lifelines=sorted(lifelines,key=lambda l:(l["distance_m"],str(l["id"])))[:5]
+        units=[]
+        for r in self.resources:
+            if r["state"] not in ("available","enroute","awaiting_handoff","on_scene") or (r["state"]!="available" and r.get("incident_id")!=incident["id"]):continue
+            speed=7 if r.get("transport")=="boat" else GROUND_SPEED
+            eta=0.0 if r["state"] in ("awaiting_handoff","on_scene") else (r.get("eta") if r.get("incident_id")==incident["id"] and r.get("eta") is not None else (_distance(r["position"],p)*1.3+r.get("approach_m",0))/speed)
+            units.append({"id":r["id"],"kind":r["kind"],"state":r["state"],"eta_s":round(eta,1),"capacity":r.get("capacity"),"assigned":r.get("incident_id")==incident["id"]})
+        units=sorted(units,key=lambda u:(not u["assigned"],u["eta_s"],u["id"]))[:12]
+        drones=sorted(((round(_distance(d["position"],p)/18,1),d["id"],d) for d in self.drones if d["active"] and d["link"] and d["state"] in ("ready","patrolling")),key=lambda o:o[:2])
+        report=dict(incident.get("report") or {})
+        report.update({k:v for k,v in {"people":incident.get("reported_people"),"callers":incident.get("callers"),"vulnerable":incident.get("vulnerable"),
+                       "injuries":incident.get("injuries"),"hazards":incident.get("hazards_reported")}.items() if v not in (None,[])})
+        report.setdefault("people",incident["people"])
+        vulnerable=incident.get("vulnerable") or []
+        injuries=incident.get("injuries") or []
+        return {"incident_id":incident["id"],"category":incident.get("disruptionops_category") or incident["category"],"sim_category":incident["category"],
+            "t_s":round(t,2),"onset_s":round(incident["created_at"],2),"text":incident.get("report_text") or incident["title"],
+            "position":[round(float(v),2) for v in p],"severity":incident["severity"],"status":incident["status"],
+            "people":incident["people"],"vulnerable":len(vulnerable) if isinstance(vulnerable,list) else vulnerable,"vulnerable_hints":vulnerable if isinstance(vulnerable,list) else [],
+            "injured":len(injuries) if isinstance(injuries,list) else injuries,"injury_hints":injuries if isinstance(injuries,list) else [],
+            "crowd_density_per_100m2":round(incident["people"]/max(1.0,area)*100,2),"hazards":hazards,"trend":trend,
+            "report":report,"report_confidence":report.get("confidence",0.6),
+            "briefing":copy.deepcopy(incident["briefing"]),"briefing_revision":(incident["briefing"] or {}).get("revision"),
+            "observations":[e for e in evidence if e.get("source")!="report"][-10:],
+            "needs":list(incident["needs"]),"supplied":list(incident["supplied"]),"evacuated":incident["evacuated_people"],
+            "required_kinds":list(incident["required_kinds"]),"completed_kinds":list(incident["completed_kinds"]),
+            "open_requests":[{k:q[k] for k in ("request_id","needed_kind","qty","status")} for q in incident.get("resource_requests",[]) if q["status"]=="open"],
+            "units":units,"lifelines":lifelines,
+            "drones_available":[{"id":i,"eta_s":e,"payload":d["payload"],"stock":d["payload_stock"],"battery":round(d["battery"],3)} for e,i,d in drones[:4]],
+            "drones_assigned":[d["id"] for d in self.drones if d["task_id"]==incident["id"]]}
+
+    def _planning_context(self):
+        fleet={}
+        for r in self.resources:
+            entry=fleet.setdefault(r["kind"],{"available":0,"total":0});entry["total"]+=1;entry["available"]+=r["state"]=="available"
+        to_do={"rescue":"rescue_team","engineering":"jcb"}
+        resources=[{"id":r["id"],"kind":to_do.get(r["kind"],r["kind"]),"state":r["state"],"capacity":r.get("capacity"),"name":r.get("name",r["id"]),
+                    "position":[round(float(v),1) for v in r["position"][:2]],"approach_s":round(r.get("approach_m",0)/(7 if r.get("transport")=="boat" else GROUND_SPEED),1),
+                    "assigned_to":r.get("incident_id")} for r in self.resources]
+        drones=[{"id":d["id"],"payload":d["payload"] if d["payload_stock"]>0 else "none","stock":d["payload_stock"],"position":[round(float(v),1) for v in d["position"][:2]],
+                 "energy_frac":round(d["battery"],3),"available":d["active"] and d["state"] in ("ready","patrolling"),"link":d["link"],"assigned_to":d["task_id"]}
+                for d in self.drones if d["active"]]
+        concurrent=[i["situation"] for i in self.incidents if i["status"]!="resolved" and i.get("situation")]
+        return {"t_s":round(self.t,2),"resources":resources,"drones":drones,"concurrent":concurrent,
+            "drone_caps":{"per_incident":self._cap_per_incident() if self.docks else 1,"available_total":max(0,self._cap_total()-self._launched()) if self.docks else len(drones)},
+            "fleet":fleet,"mutual_aid_kinds":sorted(set(CATALOG_KINDS.values())) if not self.external_ground else [],
+            "drone_summary":{"usable":sum(d["active"] and d["link"] for d in self.drones),"airborne":self._launched(),"cap_total":self._cap_total() if self.docks else None,
+                      "cap_per_incident":self._cap_per_incident() if self.docks else None},
+            "open_incidents":[{"id":i["id"],"category":i.get("disruptionops_category") or i["category"],"severity":i["severity"],"status":i["status"]} for i in self.incidents if i["status"]!="resolved"],
+            "world_id":self.world_id}
+
+    def _apply_plan(self,incident,plan,source,reason):
+        """Apply a validated plan. Plan-owned incidents (orchestrator reports, hint-only scenario reports)
+        take the plan's unit kinds; prescribed scenario incidents only accept escalation (extra units)."""
+        owned=bool(incident.get("plan_owned") or incident.get("required_hint_only"))
+        incident["plan"]={"source":plan.get("source") or source,"at":round(self.t,2),"reason":reason,"rationale":plan["rationale"],
+            "resource_requests":plan["resource_requests"],"drones":plan["drones"],"severity":plan["severity"],"escalation":plan["escalation"]}
+        incident["drone_plan"]={"roles":[d["role"] for d in plan["drones"]],"payloads":[d["payload"] for d in plan["drones"] if d.get("payload")]}
+        changes=[]
+        if owned and plan["severity"] and plan["severity"]!=incident["severity"]:
+            changes.append(f"severity {incident['severity']}->{plan['severity']}");incident["severity"]=plan["severity"]
+        wanted={q["kind"]:q for q in plan["resource_requests"]}
+        added=[]
+        def pending(kind):
+            return sum(max(0,r["qty"]-len(r["fulfilled_by"])) for r in incident["resource_requests"] if r["needed_kind"]==kind and r["status"]=="open")
+        def committed(kind):
+            return sum(1 for r in self.resources if r.get("incident_id")==incident["id"] and _serves(r,kind))
+        def raise_kind(kind,qty,why):
+            first=not any(r["needed_kind"]==kind for r in incident["resource_requests"])
+            if kind not in incident["required_kinds"]:
+                incident["required_kinds"].append(kind);added.append(kind);changes.append(f"+{kind}")
+            if qty>0:
+                # One request per need (never a "1x" followed by a "3x" for the same need).
+                self._raise_resource_request(incident,kind,qty,why,"report" if first else "plan");changes.append(f"+{qty}x {kind}")
+        def stand_down(kind,qty,why):
+            for r in reversed(incident["resource_requests"]):
+                if qty<=0:break
+                if r["needed_kind"]!=kind or r["status"]!="open":continue
+                spare=r["qty"]-len(r["fulfilled_by"]);cut=min(spare,qty);qty-=cut
+                r["qty"]-=cut
+                if r["qty"]<=len(r["fulfilled_by"]):
+                    r["status"]="cancelled" if not r["fulfilled_by"] else "fulfilled";r["cancelled_at"]=round(self.t,2)
+                self.bus.post("swarm","command_center","cancel",f"Stand down {cut}x {kind} on {r['request_id']}: {why}.",incident["id"],r["request_id"],{"kind":kind,"qty":cut})
+                changes.append(f"-{cut}x {kind}")
+            if owned and kind in incident["required_kinds"] and kind not in incident["completed_kinds"] and not committed(kind) and not pending(kind):
+                incident["required_kinds"].remove(kind)
+        if plan.get("requests_delta") is not None:
+            # Reasoner plan: requests are totals; apply only the deltas (idempotent against open requests).
+            for item in plan["requests_delta"]:
+                kind,delta=item["kind"],item["delta"]
+                why=(wanted.get(kind) or {}).get("why") or item.get("why") or f"{source} plan"
+                if delta>0:
+                    if kind not in incident["required_kinds"] and not owned:continue
+                    already=committed(kind)+pending(kind);total=(wanted.get(kind) or {}).get("qty",already+delta)
+                    if total>already:raise_kind(kind,total-already,why)
+                elif delta<0:
+                    stand_down(kind,-delta,why)
+        elif owned and (wanted or source!="fallback"):
+            # Fallback plan: diff the wanted totals against what is committed or requested.
+            if incident.get("required_hint_only"):incident["required_source"]=plan.get("source") or source
+            for kind in [k for k in incident["required_kinds"] if k not in wanted and k not in incident["completed_kinds"]]:
+                if committed(kind):continue
+                stand_down(kind,pending(kind),f"no longer needed ({reason})")
+                if kind in incident["required_kinds"]:incident["required_kinds"].remove(kind)
+            for kind,q in wanted.items():
+                if q["qty"]>committed(kind)+pending(kind) or kind not in incident["required_kinds"]:
+                    raise_kind(kind,max(1,q["qty"]-committed(kind)-pending(kind)),q["why"] or f"{source} plan")
+        elif not owned:
+            for kind,q in wanted.items():
+                if kind in incident["required_kinds"] and q["qty"]>1 and q["qty"]>committed(kind)+pending(kind):
+                    raise_kind(kind,q["qty"]-committed(kind)-pending(kind),q["why"] or f"{source} plan (escalation)")
+        if owned and incident.get("required_hint_only"):incident["required_source"]=plan.get("source") or source
+        for kind,q in wanted.items():
+            if q["urgency"]:
+                for r in incident["resource_requests"]:
+                    if r["needed_kind"]==kind and r["status"]=="open":r["urgency"]=q["urgency"]
+        if added:self._ensure_ground_kinds(added)
+        return changes
+
+    def _observe_evidence(self,incident,drone):
+        """A drone observation (with sensor confidence) is new evidence: record it and re-plan."""
+        briefing=incident["briefing"] or {}
+        incident.setdefault("evidence",[]).append({"source":"drone","drone_id":drone["id"],"t_s":round(self.t,2),"confidence":briefing.get("confidence"),
+            "people":incident["people"],"hazards":list(briefing.get("hazards") or []),"briefing_revision":briefing.get("revision")})
+        incident["evidence"]=incident["evidence"][-20:]
+        self.coordinator.plan_response(incident,f"briefing r{briefing.get('revision')} from {drone['id']}")
+
+    def _replan(self,reason,waiting_only=False):
+        """Re-plan open incidents when evidence or resources change (synchronous, deterministic)."""
+        for incident in self.incidents:
+            if incident["status"]=="resolved" or (waiting_only and not incident.get("wait_reason")):continue
+            if incident.get("required_hint_only"):incident["plan_owned"]=True
+            self.coordinator.plan_response(incident,reason)
+
     def _launched(self):
         return sum(1 for d in self.drones if d.get("dock_id") and d["state"] in ("enroute","observing","returning","holding"))
 
@@ -547,6 +752,10 @@ class OperationsSimulation:
             entry["data"] = data
         self.events.append(entry)
         self.events = self.events[-180:]
+        if kind in ORCHESTRATOR_STATUS and kind not in ("request_accepted","request_declined","resource_request") and hasattr(self,"bus"):
+            # Status back to the command centre (the orchestrator) over the bus.
+            self.bus.post("swarm","command_center","ack" if kind=="resource_request_fulfilled" else "handoff" if kind=="handoff" else "status",
+                          message,incident_id,entry.get("request_id"),{"status":entry["status"],**({"data":data} if data else {})})
 
     def _signal(self, kind, from_type, from_id, to_ids, position, incident_id, text):
         """Short-lived communication pulse for the viewer (kept for SIGNAL_WINDOW sim-seconds)."""
@@ -573,7 +782,7 @@ class OperationsSimulation:
         distance,_,identifier,holder_type=min(offers)
         return {"id":identifier,"type":holder_type,"distance":distance}
 
-    def _incident(self, position, category, title, severity, people, needs, required, source="scenario", building_id=None):
+    def _incident(self, position, category, title, severity, people, needs, required, source="scenario", building_id=None, defer_requests=False):
         # Detection deduplication is spatial + category, with severity escalation.
         for incident in self.incidents:
             if incident["category"] == category and _distance(incident["position"],position)<35 and incident["status"]!="resolved":
@@ -597,12 +806,18 @@ class OperationsSimulation:
         self._event("incident",title,incident["id"])
         origin={"operator":"Operator-raised SOS","operator-random":"Operator-added SOS","sos":"SOS call"}.get(source,"Detection")
         self._signal("sos","incident",incident["id"],["control"],position,incident["id"],f"{origin}: {title} ({people} people, severity {severity}).")
-        # The swarm (an agency) asks the orchestrator for the ground agencies the report implies.
-        for kind in required:
-            self._raise_resource_request(incident,kind,1,f"initial report: {category}, {people} people","report")
+        incident.update(required_hint=list(required),evidence=[],plan=None,plan_owned=False,situation=None)
+        # The swarm (an agency) asks the orchestrator for the ground agencies the report implies
+        # (agency requests defer this to SwarmCoordinator.plan_response).
+        if not defer_requests:
+            for kind in required:
+                self._raise_resource_request(incident,kind,1,f"initial report: {category}, {people} people","report")
         return incident
 
     def _raise_resource_request(self,incident,kind,qty,rationale,stage):
+        if self._paused() and stage!="report":
+            self.decisions.record("swarm","hold_request",f"autonomy paused: {qty}x {kind} not requested ({rationale})",incident_id=incident["id"])
+            return None
         self._resource_request_seq=getattr(self,"_resource_request_seq",0)+1
         request={"request_id":f"{incident['id']}-RR{len(incident['resource_requests'])+1}","incident_id":incident["id"],"needed_kind":kind,"qty":qty,
                  "urgency":"critical" if incident["severity"]>=5 else "high" if incident["severity"]>=4 else "normal",
@@ -611,6 +826,8 @@ class OperationsSimulation:
         incident["resource_requests"].append(request)
         self._event("resource_request",f"Swarm requests {qty}x {kind} for {incident['id']} ({rationale}).",incident["id"],data={k:request[k] for k in ("request_id","needed_kind","qty","urgency","position","rationale","briefing_revision")})
         self._signal("resource_request","incident",incident["id"],["orchestrator"],incident["position"],incident["id"],f"Request {qty}x {kind}: {rationale}.")
+        self.bus.post("swarm","command_center","resource_request",f"Request {qty}x {kind} for {incident['id']}: {rationale}.",incident["id"],request["request_id"],
+                      {k:request[k] for k in ("needed_kind","qty","urgency","position","rationale","briefing_revision")})
         return request
 
     def _fulfil_request(self,incident,kind,unit_id):
@@ -749,7 +966,7 @@ class OperationsSimulation:
         corridor=self.flood["width"]/2+1
         # A flood zone that reaches the river is navigable from the river to the incident.
         if origin[0]>corridor and not self._submerged(start):return None
-        if target[0]>corridor and not (self._submerged(end) and self._submerged(target[1])):return None
+        if target[0]>corridor and not self._submerged(end):return None
         river=self.world["river"];first,last=origin[2]+origin[3],target[2]+target[3]
         points=[origin[1]]
         if first<=last:
@@ -764,8 +981,28 @@ class OperationsSimulation:
             if incident["category"]!="flood" and not self._submerged(incident["position"]):return None
             return self._water_path(resource["position"],incident["position"])
         # Rooftop boat access is deliberately different from road access.
-        if self._submerged(incident["position"]) and not self._elevated_crossing(incident["position"]):return None
+        if self._submerged(incident["position"]) and not self._elevated_crossing(incident["position"]):
+            # Localised flood zones (region worlds): a road unit meets the boats at the nearest dry
+            # road point at the water's edge (shore handover). District worlds keep road units out.
+            if not self._flood_zones():return None
+            edge=self._flood_edge(incident["position"])
+            return None if edge is None else self._ground_path(resource["position"],edge)
         return self._ground_path(resource["position"],incident["position"])
+
+    def _flood_edge(self,position):
+        """Nearest dry, base-connected road node within 900 m of a submerged position (cached)."""
+        cache=self.__dict__.setdefault("_flood_edge_cache",{})
+        key=(round(float(position[0]),1),round(float(position[1]),1),len(self._blocked_edges))
+        if key not in cache:
+            best=None
+            for radius in (150.0,400.0,900.0):
+                nodes=sorted({q for edge in self._edges_near(position[0],position[1],radius) for q in edge
+                              if not self._submerged(q) and (edge not in self._blocked_edges and (edge[1],edge[0]) not in self._blocked_edges)},
+                             key=lambda q:(_distance(q,position[:2]),q))
+                best=next(([q[0],q[1],0.0] for q in nodes[:12] if self._ground_path(self._base,[q[0],q[1],0.0]) is not None),None)
+                if best:break
+            cache[key]=best
+        return cache[key]
 
     def _build_roads(self):
         # The split graph depends only on the (immutable) world; build it once
@@ -1031,13 +1268,15 @@ class OperationsSimulation:
                     self._fulfil_request(incident,kind,resource["id"])
                 elif assigned is None:incident["wait_reason"]=f"No available {kind} with a traversable route"
             if incident["handed_over"] or incident["drone_id"] or incident["uncertain_delivery"]:continue
+            if self._paused():
+                incident["wait_reason"]=incident["wait_reason"] or f"Swarm autonomy paused by the command centre ({self.control['reason'] or 'no reason given'})"
+                continue
             if self.docks and self._launched()>=self._cap_total():
                 incident["wait_reason"]=f"Launch cap of {self._cap_total()} reached; next aircraft launches when one is back at its dock"
                 continue
             if sum(1 for d in self.drones if d["task_id"]==incident["id"] and d["active"])>=self._cap_per_incident():
                 incident["wait_reason"]=f"Per-incident cap of {self._cap_per_incident()} aircraft reached"
                 continue
-            offers=[]
             candidates=self.drones
             supply_only=False
             # Once assessed, another aircraft is sent only to bring a missing
@@ -1059,37 +1298,24 @@ class OperationsSimulation:
                 if outstanding and not supply_only:
                     stocked=[d for d in eligible if d["payload"] in outstanding and d["payload_stock"]>0 and d not in candidates]
                     candidates+=sorted(stocked,key=lambda d:(_distance(d["position"],incident["position"]),d["id"]))[:3]
-            for drone in candidates:
-                if not drone["active"] or not drone["link"] or drone["state"] not in ("ready","patrolling"):continue
-                route=self._drone_path(drone,incident["position"],standoff=STANDOFF_M,observe=True)
-                recovery=self._drone_path({**drone,"position":incident["position"]},drone.get("home",self._base))
-                if route is None or recovery is None:continue
-                travel=self._route_distance(drone["position"],route)
-                required=(travel+self._route_distance(incident["position"],recovery))*0.018+7+22
-                if drone["energy_wh"]<required:continue
-                supplies=[need for need in incident["needs"] if need in ("first_aid","medical","food") and need not in incident["supplied"]]
-                compatible=drone["payload"] in supplies and drone["payload_stock"]>0
-                # Capability is a feasibility preference before travel cost,
-                # never an arbitrary timebonus that a mismatched drone beats.
-                # Auction bid: ETA seconds plus an energy term (share of the
-                # aircraft's remaining energy this task would consume).
-                bid=travel/18+20*required/max(1e-6,drone["energy_wh"])
-                offers.append((0 if compatible or not supplies else 1,round(bid,6),drone["id"],drone,route))
-            if offers:
-                capability,bid,_,drone,route=min(offers,key=lambda offer:offer[:3])
-                was_searching=drone["state"]=="patrolling"
-                drone.update(state="enroute",task_id=incident["id"],route=route,delivered=False,coverage_task=None,search_target=None)
-                if was_searching:self._event("search_to_confirm",f"{drone['id']} leaves its search sweep (zone kept) to confirm {incident['id']}; winning bid {bid:.1f} of {len(offers)}.",incident["id"])
-                incident["drone_id"]=drone["id"];incident["status"]="responding"
+            # Each candidate aircraft evaluates the task itself (route, recovery, energy) and bids;
+            # the coordinator awards the lowest feasible bid (payload match first) and traces it.
+            awarded=self.coordinator.award(incident,candidates,self.agents,supply_only)
+            if awarded:
+                capability,bid,agent,offer,count=awarded
+                drone,route=agent.drone,offer["route"]
                 purpose=f"bringing {drone['payload']}" if supply_only else "first assessment"
+                was_searching=agent.accept(self,incident,offer,purpose)
+                if was_searching:self._event("search_to_confirm",f"{drone['id']} leaves its search sweep (zone kept) to confirm {incident['id']}; winning bid {bid:.1f} of {count}.",incident["id"])
+                incident["drone_id"]=drone["id"];incident["status"]="responding"
                 if drone.get("dock_id"):self._event("drone_launch",f"{drone['id']} launched from {drone['dock_id']} for {purpose} ({self._launched()}/{self._cap_total()} airborne); ground response continues independently.",incident["id"])
                 else:self._event("drone_dispatch",f"{drone['id']} wins feasible local bid; ground response continues independently.",incident["id"])
                 self._signal("dispatch","drone",drone["id"],["control"],drone["position"],incident["id"],
                              f"{drone['id']} {'launching from '+drone['dock_id'] if drone.get('dock_id') else 'dispatched'} to {incident['id']} ({purpose}), ETA {travel_eta(drone,route):.0f} s.")
                 if capability:self._event("supply_unavailable",f"{drone['id']} provides reconnaissance only; compatible aerial supplies unavailable.",incident["id"])
             elif not incident["drone_id"]:incident["wait_reason"]=incident["wait_reason"] or "No energy-feasible drone route"
-        # Idle aircraft search their own zone (docked fleets wait for a launch).
-        if self.docks:return
+        # Idle aircraft search their own zone (docked fleets wait for a launch; nothing new while paused).
+        if self.docks or self._paused():return
         self._update_zones()
         for drone in self.drones:
             if drone["state"]!="ready" or not drone["link"] or not drone["active"] or drone["battery"]<.4:continue
@@ -1175,6 +1401,8 @@ class OperationsSimulation:
         """The swarm is an agency: it decides itself whether to accept a request, then runs its own operation."""
         stats=self._agency_stats;stats["requests_received"]+=1
         category,kind,position=request["category"],request["kind"],list(request["position"])
+        self.coordinator.request_received(request,source)
+        checks=[]
         b=self.world.get("bounds",[-600,-600,600,600])
         def answer(accepted,reason,incident=None,merged=False,eta=None,drones=(),plan=()):
             stats["accepted" if accepted else "declined"]+=1
@@ -1182,13 +1410,19 @@ class OperationsSimulation:
                     "merged":merged,"eta_s":None if eta is None else round(eta,1),"assigned_drones":list(drones),"plan":list(plan),
                     "position":list(incident["position"]) if incident else position,"source":source}
             self._agency_requests[request["request_id"]]=result
+            self.coordinator.request_decided(request,result,checks)
             self._event("request_accepted" if accepted else "request_declined",
                         f"Swarm {'accepted' if accepted else 'declined'} {kind} request {request['request_id']} from {request['requested_by']}: {reason}.",
                         incident["id"] if incident else None,data={k:result[k] for k in ("request_id","accepted","reason","eta_s","assigned_drones","plan")})
             return result
-        if not (b[0]<=position[0]<=b[2] and b[1]<=position[1]<=b[3]):return answer(False,"outside the swarm's operating area")
+        inside=b[0]<=position[0]<=b[2] and b[1]<=position[1]<=b[3];checks.append(("inside_area",inside))
+        if not inside:return answer(False,"outside the swarm's operating area")
+        checks.append(("autonomy_running",not self._paused()))
+        if self._paused():return answer(False,f"swarm autonomy paused by the command centre ({self.control['reason'] or 'no reason given'})")
         if snap:position,building_id=self._snap_detection(position,category)
+        checks.append(("airspace_permitted",not self._in_no_fly(position)))
         if self._in_no_fly(position):return answer(False,"inside a no-fly zone; aerial response not permitted")
+        checks.append(("capacity",self._open_incidents()<MAX_OPEN_INCIDENTS))
         if self._open_incidents()>=MAX_OPEN_INCIDENTS:return answer(False,f"swarm at capacity ({MAX_OPEN_INCIDENTS} open incidents)")
         capped=bool(self.docks) and self._launched()>=self._cap_total()
         if capped and kind!="sos":return answer(False,f"launch cap of {self._cap_total()} airborne aircraft reached; retry later")
@@ -1198,13 +1432,20 @@ class OperationsSimulation:
             out=self._drone_path({**drone,"position":list(home)},position);back=self._drone_path({**drone,"position":position},home)
             if out is None or back is None:continue
             if drone["capacity_wh"]*.9>=(self._route_distance(home,out)+self._route_distance(position,back))*0.018+29:feasible=drone;break
+        checks.append(("energy_feasible_aircraft",feasible is not None))
         if feasible is None:return answer(False,"no energy-feasible aircraft route to that position")
         title,severity,_,_,required=self.INCIDENT_TEMPLATES[category]
         self._ensure_ground_kinds(required)
         before=len(self.incidents)
-        incident=self._incident(position,category,str(request.get("title") or title)[:120],request["priority"],request["people"],request["needs"],required,source,building_id=building_id)
+        incident=self._incident(position,category,str(request.get("title") or title)[:120],request["priority"],request["people"],request["needs"],required,source,building_id=building_id,defer_requests=True)
         merged=len(self.incidents)==before
-        if not merged:incident.update(request_id=request["request_id"],requested_by=request["requested_by"],request_kind=kind)
+        if not merged:
+            incident.update(request_id=request["request_id"],requested_by=request["requested_by"],request_kind=kind)
+            # The orchestrator reports facts; the swarm derives the response itself.
+            incident.update(request.get("evidence") or {})
+            incident.update(plan_owned=True,required_kinds=[],report={"people":request["people"],"needs":list(request["needs"]),"priority":request["priority"],
+                            "kind":kind,"source":source,"text":request.get("title") or "","confidence":0.6})
+        self.coordinator.plan_response(incident,"orchestrator report" if not merged else "merged report")
         self._allocate()
         drone=next((d for d in self.drones if d["id"]==incident["drone_id"]),None)
         eta=travel_eta(drone,drone["route"]) if drone and drone["route"] else None
@@ -1218,6 +1459,23 @@ class OperationsSimulation:
         plan.append("hand the scene over to the first ground crew, then return to dock" if self.docks else "hand the scene over to the first ground crew, then resume search")
         reason="merged with an existing open incident" if merged else ("accepted; aircraft assigned" if drone else "accepted; aircraft queued")
         return answer(True,reason,incident,merged,eta,[drone["id"]] if drone else [],plan)
+
+    @staticmethod
+    def _report_evidence(raw,category):
+        """Caller facts an orchestrator report may carry (sanitised; never trusted as instructions)."""
+        raw=raw if isinstance(raw,dict) else {}
+        def words(v):return [str(x)[:40] for x in v][:10] if isinstance(v,list) else []
+        def count(v):return max(0,min(500,int(v))) if isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) else None
+        evidence={"disruptionops_category":str(raw.get("disruptionops_category") or category)[:40]}
+        if isinstance(raw.get("report_text"),str):evidence["report_text"]=raw["report_text"][:240]
+        for key in ("callers","reported_people"):
+            if count(raw.get(key)) is not None:evidence[key]=count(raw.get(key))
+        if words(raw.get("vulnerable")):evidence["vulnerable"]=words(raw.get("vulnerable"))
+        injured=count(raw.get("injured_reported", raw.get("injured")))
+        injuries=words(raw.get("injuries")) or (["injured"]*min(injured,20) if injured else [])
+        if injuries:evidence["injuries"]=injuries
+        if words(raw.get("hazards")):evidence["hazards_reported"]=words(raw.get("hazards"))
+        return evidence
 
     def _agency_metrics(self):
         def median(values):
@@ -1448,6 +1706,10 @@ class OperationsSimulation:
             others=[d["id"] for d in self.drones if d["task_id"]==incident["id"]]
             self._signal("briefing","resource",resource["id"],[*others,"control"],resource["position"],incident["id"],
                          f"Ground-crew briefing from {resource.get('name',resource['id'])}: {incident['people']} people, needs {', '.join(incident['needs'])}.")
+        if incident["briefing"]["source"]=="ground crew" and incident.get("plan_owned") and not incident.get("ground_reported"):
+            incident["ground_reported"]=True
+            incident["evidence"].append({"source":"ground","t_s":round(self.t,2),"confidence":0.95,"people":incident["people"],"unit":resource["id"]})
+            self.coordinator.plan_response(incident,"ground-crew report")
         resource["acknowledged"]=True;resource["state"]="on_scene"
         if _carries_people(resource):
             # Do not double-count people already aboard another unit at this incident.
@@ -1475,6 +1737,8 @@ class OperationsSimulation:
                 else:
                     self._signal("recall","resource",resource["id"],[drone["id"]],resource["position"],incident["id"],
                                  f"Ground crew on scene first; {drone['id']} recalled to {drone.get('dock_id') or 'base'}.")
+                    self.bus.post("swarm",drone["id"],"cancel",f"Ground crew {resource['id']} on scene first; {drone['id']} recalled.",incident["id"],incident.get("request_id"))
+                    self.agents[drone["id"]].decide("return",f"recalled: {resource['id']} {why}",incident_id=incident["id"])
                     self._return(drone,f"recalled - {resource['id']} {why}","drone_recall")
             else:
                 self._signal("recall","resource",resource["id"],[drone["id"]],resource["position"],incident["id"],f"Handoff accepted; {drone['id']} released.")
@@ -1501,6 +1765,7 @@ class OperationsSimulation:
                     drone["battery"]=drone["energy_wh"]/drone["capacity_wh"]
                 if drone["link"]:drone["last_telemetry"]=self.t
                 if drone["battery"]<.23 and drone["state"] not in ("returning","holding","charging","ready","lost_link"):
+                    self.agents[drone["id"]].decide("return","energy reserve reached (battery below 23%)",incident_id=drone["task_id"])
                     self._return(drone,"energy reserve reached")
                 if drone["battery"]<=0:
                     drone.update(active=False,state="emergency_landed",route=[])
@@ -1529,46 +1794,14 @@ class OperationsSimulation:
                 if not yield_to_peer:self._move(drone,delta,18)
                 drone["speed_mps"]=round(_distance(before,drone["position"])/delta,2)
                 self._observe_cells(drone,delta)
-                incident=self._find_incident(drone["task_id"])
-                if drone["state"]=="enroute" and not drone["route"] and incident and drone.get("retasked")=="supply":
-                    # Ground crew already briefed: drop the supply only, then go home.
-                    if drone["payload_stock"]>0 and drone["payload"] in incident["needs"] and drone["payload"] not in incident["supplied"]:
-                        incident["supplied"].append(drone["payload"]);drone["delivered"]=True;drone["payload_stock"]-=1;drone["delivered_at"]=self.t
-                        self._event("supply",f"{drone['id']} simulated {drone['payload']} delivery to the ground crew; incident remains open.",incident["id"])
-                        self._signal("ack","drone",drone["id"],[incident["id"],*[r for r in incident["resource_ids"]]],drone["position"],incident["id"],f"{drone['id']} dropped {drone['payload']} at {incident['id']}.")
-                    self._return(drone,"supply drop complete; ground crew holds the scene")
-                elif drone["state"]=="enroute" and not drone["route"] and incident:
-                    drone["state"]="observing";incident["status"]="observing" if not incident["handed_over"] else incident["status"];self._brief(incident,drone)
-                    first_look=incident["observations"]<=1
-                    if drone["payload_stock"]>0 and drone["payload"] in incident["needs"] and drone["payload"] not in incident["supplied"]:
-                        incident["supplied"].append(drone["payload"]);drone["delivered"]=True;drone["payload_stock"]-=1;drone["delivered_at"]=self.t
-                        self._event("supply",f"{drone['id']} simulated {drone['payload']} delivery; incident remains open.",incident["id"])
-                        self._signal("ack","drone",drone["id"],[incident["id"]],drone["position"],incident["id"],f"{drone['id']} dropped {drone['payload']} at {incident['id']}.")
-                    self._brief(incident,drone)
-                    self._drone_arrival_brief(drone,incident,first_look)
-                elif drone["state"]=="observing" and incident:
-                    if self.t-(incident["last_observed"] or 0)>4:self._brief(incident,drone)
-                    if drone["payload_stock"]==0 and self.t-drone.get("delivered_at",self.t)>8:self._return(drone,"supplies exhausted; returning to reload while incident and agency response remain open")
-                elif drone["state"]=="returning" and not drone["route"]:
-                    drone["state"]="charging"
-                    if drone["payload_stock"]==0:
-                        drone["payload_stock"]=drone["payload_capacity"]
-                        self._event("reload",f"{drone['id']} reloaded {drone['payload']} at {drone['dock_id'] if drone.get('dock_id') else 'the operations base'}.")
-                elif drone["state"]=="charging":
-                    drone["energy_wh"]=min(drone["capacity_wh"],drone["energy_wh"]+delta*.7)
-                    drone["battery"]=drone["energy_wh"]/drone["capacity_wh"]
-                    if drone["battery"]>.85:drone["state"]="ready"
-                elif drone["state"]=="patrolling" and not drone["route"]:
-                    # Sweep finished: go straight to the next most likely cell
-                    # in the zone (no hovering in 'ready'), else fly home.
-                    drone.update(coverage_task=None,search_target=None)
-                    if not (drone["battery"]>=.4 and self._next_search(drone)):
-                        self._return(drone,"search zone swept")
+                # Decide and act: the aircraft's own behaviour tree (swarm_ops.agents.DRONE_TREE).
+                self.agents[drone["id"]].tick(self,delta)
             for resource in self.resources:
                 if self.external_ground:continue
                 if resource["state"]=="busy" and resource["free_at"] is not None and self.t>=resource["free_at"]:
                     resource.update(state="available",free_at=None,freed_at=self.t)
                     self._event("resource_free",f"{resource['id']} is now free; pending incidents will be reconsidered.")
+                    self._replan(f"{resource['id']} freed",waiting_only=True)
                 if resource["state"] in ("enroute","evacuating"):
                     velocity=7 if resource.get("transport")=="boat" else 9
                     before=list(resource["position"])
@@ -1635,6 +1868,7 @@ class OperationsSimulation:
                             resource.update(state="evacuating",route=path,eta=self._route_distance(resource["position"],path)/velocity,transfer_destination=destination)
                             incident["status"]="evacuating"
                     else:self._complete_service(resource,incident)
+            self.traffic.step(delta)
             if self.t-self._last_allocate>=1:
                 self._allocate();self._last_allocate=self.t
         self._prune_signals()
@@ -1712,6 +1946,17 @@ class OperationsSimulation:
                 if not 1<=int(value)<=100:raise ValueError("Fleet size must be between 1 and 100")
                 self.fleet_size=int(value)
                 self._initialize(self.scenario["id"])
+            elif action=="control":
+                autonomy=payload.get("autonomy")
+                if autonomy not in ("paused","running"):raise ValueError("autonomy must be paused or running")
+                reason=str(payload.get("reason") or "")[:160] or None
+                previous=self.control["autonomy"]
+                self.control.update(autonomy=autonomy,reason=reason,since=round(self.t,2),by=str(payload.get("by") or "command_center")[:40])
+                self.decisions.record("swarm","autonomy_"+autonomy,(reason or "command centre instruction")+("" if previous!=autonomy else " (unchanged)"))
+                self.bus.post("command_center","swarm","task",f"control: autonomy {autonomy}"+(f" ({reason})" if reason else ""),body={"autonomy":autonomy})
+                self.bus.post("swarm","command_center","ack",f"Autonomy {autonomy}; "+("no new launches or requests, aircraft in flight finish or return." if autonomy=="paused" else "normal operation resumed."),body={"autonomy":autonomy})
+                self._event("control",f"Command centre set swarm autonomy {autonomy}"+(f": {reason}" if reason else "")+".")
+                if autonomy=="running":self._allocate()
             elif action in ("pause","resume"):
                 self.paused=action=="pause"
             elif action=="speed":
@@ -1723,6 +1968,7 @@ class OperationsSimulation:
                 if drone is None:raise ValueError("Unknown drone")
                 if not drone["active"]:raise ValueError("Drone is already unavailable")
                 kind=payload.get("kind");incident=self._find_incident(drone["task_id"])
+                self.decisions.record("swarm","fault_response",f"{drone['id']} {kind}: "+{"crash":"release its incident for re-award","battery":"recall it; re-award its incident","link":"keep ownership (delivery uncertain); do not duplicate"}.get(kind,"unknown fault"),incident_id=incident["id"] if incident else None)
                 if kind=="crash":
                     drone.update(active=False,state="crashed",route=[])
                     if incident and incident["drone_id"]==drone["id"]:
@@ -1786,12 +2032,15 @@ class OperationsSimulation:
                     if kind not in REQUEST_KINDS:raise ValueError("kind must be one of sos, assess, supply, overwatch")
                     raw=payload.get("position")
                     if not isinstance(raw,list) or len(raw) not in (2,3) or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in raw):raise ValueError("position must be two or three finite coordinates")
-                    category=self._category(payload.get("category","medical"))
+                    raw_category=str(payload.get("category","medical"))[:40]
+                    category=self._category(raw_category)
+                    evidence=self._report_evidence(payload.get("situation"),raw_category)
                     default_needs={"assess":["assessment"],"overwatch":["assessment"]}.get(kind,self.INCIDENT_TEMPLATES[category][3])
                     needs=self._validated_needs(payload.get("needs",default_needs))
                     severity,people=self._validated_numbers({"severity":payload.get("priority",3),"people":payload.get("people",1)})
                     created=self._agency_request({"request_id":request_id,"kind":kind,"position":([float(v) for v in raw]+[0.0])[:3],"category":category,
-                        "people":people,"needs":needs,"priority":severity,"requested_by":str(payload.get("requested_by","orchestrator"))[:80]},"orchestrator")
+                        "people":people,"needs":needs,"priority":severity,"requested_by":str(payload.get("requested_by","orchestrator"))[:80],
+                        "evidence":evidence,"title":evidence.get("report_text")},"orchestrator")
             elif action=="external_resource_update":
                 if payload.get("source")!="disruptionops":raise ValueError("External updates require DisruptionOps source")
                 if payload.get("run_id") not in (None,self.run_id):raise ValueError("External update belongs to a different run")
@@ -1914,6 +2163,10 @@ class OperationsSimulation:
         moving=drone["active"] and drone["state"] not in ("ready","charging","lost_link")
         view["speed_mps"]=float(drone.get("speed_mps",0.0)) if moving else 0.0
         view["behavior"]=self._behavior(drone)
+        view["last_decision"]=drone.get("last_decision")
+        if drone["task_id"] and drone["state"] in ("enroute","observing"):
+            # Hover (stand-off) point of the current incident task.
+            view["standoff"]=list(drone["route"][-1]) if drone["state"]=="enroute" and drone["route"] else list(drone["position"])
         view["zone"]=list(drone.get("zone",[]))
         if drone["state"]=="patrolling" and drone.get("search_target"):
             view["target"]={"type":"cell","id":drone["search_target"],"position":[*self.search_cells[drone["search_target"]]["center"],0]}
@@ -1944,7 +2197,8 @@ class OperationsSimulation:
         return copy.deepcopy({"schema_version":2,"run_id":self.run_id,"revision":self.revision,"t":round(self.t,3),
             "paused":self.paused,"speed":self.speed,"scenario":self.scenario,"anchor":ANCHOR,"flood":self.flood,"road_conditions":self.road_conditions,
             **({"world":self.world} if include_world else {}),
-            "drones":[self._drone_view(d) for d in self.drones],"resources":self.resources,"incidents":self.incidents,"events":self.events,
+            "drones":[self._drone_view(d) for d in self.drones],
+            "resources":[{**r,"model":r.get("model") or ("boat" if r.get("transport")=="boat" else RESOURCE_KINDS.get(r["kind"],{}).get("model",r["kind"]))} for r in self.resources],"incidents":self.incidents,"events":self.events,
             "signals":[s for s in self.signals if self.t-s["t"]<=SIGNAL_WINDOW],
             "docks":[{**dock,"docked":sum(1 for d in self.drones if d.get("dock_id")==dock["id"] and d["state"] in ("ready","charging")),
                       "launched":sum(1 for d in self.drones if d.get("dock_id")==dock["id"] and d["state"] in ("enroute","observing","returning","holding"))} for dock in self.docks],
@@ -1953,6 +2207,8 @@ class OperationsSimulation:
                            "last_observed":None if c["last"] is None else round(c["last"],2),
                            "status":"blocked" if c["blocked"] else "cleared" if c["p"]<.12 else "searched" if c["last"] is not None else "unsearched"} for c in self.search_cells.values()],
             "people":self._people(),
+            "decisions":self.decisions.recent(100),"engine":{"decisions":self.decisions.recent(100)},"messages":self.bus.recent(200),"control":dict(self.control),
+            "traffic":self.traffic.snapshot() if getattr(self,"traffic",None) else [],
             "metrics":{"fleet":len(self.drones),"active_drones":sum(d["active"] for d in self.drones),
                 "open_incidents":len(active),"resolved_incidents":len(self.incidents)-len(active),
                 "available_resources":sum(r["state"]=="available" for r in self.resources),

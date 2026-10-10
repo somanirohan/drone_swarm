@@ -107,6 +107,17 @@ DisruptionOps is the orchestrator; the swarm is an agency that decides for itsel
 
 **Status back**: every event with an orchestrator meaning carries `status` (and `request_id`, `data` where useful): `accepted`, `declined`, `launched`, `on_scene`, `briefing` (`data.revision`), `resource_request`, `resource_assigned`, `supply_delivered`, `ground_arrived` (`data.first`), `retasked`, `recalled`, `handed_over`, `completed`. They are journalled on `/ops/events` and sent in snapshots. `random_incident` and `detect` use exactly this path (`source:"orchestrator-sim"`).
 
+## Agents, plans, traffic and control (additive)
+
+- `decisions` (last 100): `{id: "dec-N", t, agent, decision, kind, reason, summary, options:[{id, score}], incident_id, drone_id, fallback, source: reasoner|fallback|swarm|rule, ...}`. `plan_response` entries add `latency_ms`, `inputs`, `factors`, `plan_source`, `applied`.
+- `messages` (last 200): `{id, t, from, to, kind, incident_id, request_id, text, body}`. Kinds: `task|accept|decline|report|status|resource_request|ack|cancel|handoff`. Parties: `command_center` (DisruptionOps), `swarm` (SwarmCoordinator), drone ids. Inbound `agency_request` is a `task` from `command_center`, and the answer is `accept` or `decline`. Raised requests are `resource_request`, and orchestrator status events are `status`, `ack` or `handoff`. Plan stand-downs are `cancel`.
+- Per drone: `last_decision {t, decision, reason}`. While tasked to an incident, `standoff [x,y,z]` is the hover point, 20 m from the target on the approach side.
+- Per incident: `situation` (the planner's input: people, vulnerable, injured, crowd_density_per_100m2, hazards, trend, report, briefing, observations, units with `eta_s`, lifelines, drones_available, open_requests) and `plan` (the applied plan: source, rationale, resource_requests, drones, severity, escalation).
+- `traffic` (≤ 80): `{id, kind: car|auto|bike|bus, position, heading (radians, atan2(dy,dx)), speed_mps}`. Traffic is visual only; responders are never blocked.
+- `control`: `{autonomy: running|paused, reason, since, by}`. Command `control` `{autonomy, reason}` pauses new launches, searches and requests. Aircraft in flight finish or return, and `agency_request` is declined while paused. It is an engine command; the server decides who may send it.
+- Resources carry `model` (viewer hint: fire_engine, ambulance, rescue_van, boat, jcb, pump_truck, water_tanker, supply_truck, bus, police). `scenario.data_source` is `live|assets` (reference data via `swarm_ops.disruptionops_client`).
+- Categories accepted by `detect`/`random_incident`/`agency_request` also include the DisruptionOps ids person_stranded, flooded_road, waterlogging, fallen_tree, structural_damage, evacuation, supply_shortage, shelter_full and air_quality. For orchestrator reports, the unit kinds come from `swarm_ops.reasoning.plan_response`; the response is not a fixed table. A fallback traced as `fallback:true` uses DisruptionOps taxonomy needs, then the engine template.
+
 ## Scenario and world registry (engine plug-in hook)
 
 Scenarios beyond the four built-ins are registered in Python, not over the socket:

@@ -6,7 +6,7 @@ Read from `ops_simulation.py`, now `swarm_ops/engine.py` (1,707 lines at the tim
 
 | Algorithm | Where | What it does | Limits |
 |---|---|---|---|
-| Grid A* for drones | `_grid_cells`, `_drone_path`, `_flight_grid`, `_restricted` | 8-connected A* over a 35 m grid, straight-line heuristic, edges blocked when they cross a no-fly polygon (sampled every 8 m). Results cached per (source cell, dest cell). Altitude is `max(cruise, target height + 12, tallest building + 12) + lane`, so drones fly above all obstacles. | Horizontal only; vertical motion is kinematic. No wind, no terrain-following, no collision avoidance between drones (no ORCA, no separation logic beyond a per-drone altitude `lane`). Returns `None` when the target or start is inside a no-fly zone; the caller then treats the drone as ineligible. |
+| Any-angle flight planner | `swarm_ops/planning.py` `FlightPlanner.route`, `_drone_path` | Straight line when clear of no-fly polygons; otherwise a visibility graph over the convex corners of the no-fly polygons, pushed out by 12 m, searched with A* (shortest any-angle path). Coarse-grid A* plus string pulling is the fallback. Starts at the drone's current xy (no snap-back). Incident targets end at a 20 m stand-off hover point on the approach side, with a 1:3 descent to an observation altitude. Transit altitude is `max(cruise, tallest building within 15 m of this path + 12, target + 12) + lane`. LRU-cached; buildings are spatially hashed. | Before (35 m grid A*): path/straight median 1.106, max 1.565; 39/79 missions had a >120° heading reversal (16 near the target); 6/79 circled the target >180°; 50/79 started by snapping back. After: 1.000/1.001 and 0 for each. No wind, no inter-drone avoidance beyond altitude lanes, polygons only (circles become 24-gons). |
 | Dijkstra for ground units | `_ground_path_uncached` (cached by `_ground_path`) | Shortest path over the OSM road graph (`_build_roads`). Start and end are connected to the nearest road segment by overlay edges (`_road_connector`). Blocked edges (flooded, damaged bridge) are skipped. | Distance cost only: no speed limits, traffic, turn costs or one-way handling (not verified). Cache key includes only the number of blocked edges, so two different closure sets of equal size could in principle return a stale route (**UNVERIFIED**, noted as a risk). |
 | Boat routing | `_water_path`, `_resource_path` | Boats follow the river corridor (`_river_projection`). | Synthetic corridor, not hydrodynamics. |
 | Off-map approach | `_allocate` (`approach_m`, `approach_until`) | A real PCMC unit whose station is outside the 1.2 km map pays its real remaining distance divided by ground speed (9 m/s, boat 7) as a one-off delay at the map edge. | Straight remaining distance from the catalog, not a road route. |
@@ -58,7 +58,8 @@ Limits: not connected to DisruptionOps; the local mock orchestrator is nearest-a
 
 ## 9. Not used (do not claim these)
 
-- No CBBA, CBAA or any distributed consensus; no peer-to-peer messaging.
+- No CBBA, CBAA or any distributed consensus. Agents (`swarm_ops/agents.py`: DroneAgent behaviour tree and self-evaluated bids, SwarmCoordinator, MessageBus, DecisionLog) run in one process and one deterministic loop; messages always arrive.
+- Response planning goes through `SwarmCoordinator.plan_response` -> `swarm_ops.reasoning.plan_response` (offline, deterministic). The taxonomy/template fallback is traced as `fallback`. No LLM in any decision path.
 - No ORCA/velocity-obstacle collision avoidance; separation is by altitude lane only.
 - No PX4, ArduPilot, Gazebo, ROS or flight dynamics; motion is kinematic (`_move`).
 - No camera model, detection model or SLAM; "observation" is a state change.
