@@ -427,7 +427,7 @@ function setConnection(on,message){connected=on;$('connection').textContent=on?'
 function clearRun(){
  disposeGroup(actorsGroup);disposeGroup(selGroup);disposeGroup(docksGroup);disposeGroup(footGroup);disposeGroup(coverageGroup);disposeGroup(trailGroup);disposeGroup(peopleGroup);disposeGroup(zoneGroup);peopleObjects.clear();zoneSignature='';
  for(const [id,r] of routeLines){routesGroup.remove(r.line);r.geo.dispose()}for(const [id,rec] of signalObjects)removeSignal(id,rec);
- droneObjects.clear();resourceObjects.clear();incidentObjects.clear();dockObjects.clear();footObjects.clear();routeLines.clear();seenSignals.clear();traffic.map.clear();leadIn=null;trailLine=null;selSignature='';coverageSignature='';
+ droneObjects.clear();resourceObjects.clear();incidentObjects.clear();dockObjects.clear();footObjects.clear();routeLines.clear();seenSignals.clear();traffic.map.clear();logReset();leadIn=null;trailLine=null;selSignature='';coverageSignature='';
 }
 
 function applySnapshot(packet){
@@ -435,7 +435,7 @@ function applySnapshot(packet){
  if(run!==next.run_id){run=next.run_id;sequence=-1;selected=null;clearRun();if(!next.world)disposeGroup(worldGroup)}
  sequence=packet.seq;state=next;const now=performance.now();if(lastPacket){const gap=now-lastPacket;if(gap<2000)packetDur=Math.max(60,Math.min(500,packetDur*.7+gap*.3))}lastPacket=now;
  if(next.world)buildWorld(next.world);updateDynamicWorld();
- syncDocks();syncActors(state.drones,droneObjects,createDrone,'drone');syncActors(state.resources,resourceObjects,createResource,'resource');syncActors(state.incidents,incidentObjects,createIncident,'incident');syncTraffic();
+ syncDocks();syncActors(state.drones,droneObjects,createDrone,'drone');syncActors(state.resources,resourceObjects,createResource,'resource');syncActors(state.incidents,incidentObjects,createIncident,'incident');syncTraffic();ingestLog(state);
  for(const o of incidentObjects.values()){if(o.userData.item?.handed_over)o.userData.ring.material.color.set('#89d8a8')}
  syncFootprints();syncSignals();syncPeople();syncSearch();checkNewIncident();updateRoutes();uiDirty=true;
  if(now-lastUI>250||!connected){renderUI();lastUI=now}
@@ -806,7 +806,7 @@ const isCommandName=n=>/command|disruption|ops|center|centre|control|dispatch/i.
 function fmtBody(m){
  let b=m.body;const parts=[];if(m.text)parts.push(String(m.text));
  if(b&&typeof b==='object'){const e=b.eta_s??b.eta;if(e!=null)parts.push(`ETA ${Math.round(e)} s`);if(b.reason)parts.push(`Reason: ${nice(b.reason)}`);if(b.distance_m!=null)parts.push(`${Math.round(b.distance_m)} m away`);if(b.battery!=null)parts.push(`battery ${Math.round(b.battery*(b.battery<=1?100:1))}%`);if(b.summary)parts.push(String(b.summary));
-  for(const [k,v] of Object.entries(b)){if(parts.length>=6)break;if(['eta_s','eta','reason','distance_m','battery','summary','text'].includes(k)||typeof v==='object')continue;parts.push(`${nice(k)}: ${nice(v)}`)}}
+  for(const [k,v] of m.text?[]:Object.entries(b)){if(parts.length>=6)break;if(['eta_s','eta','reason','distance_m','battery','summary','text'].includes(k)||typeof v==='object')continue;parts.push(`${nice(k)}: ${nice(v)}`)}}
  else if(b!=null&&b!==''&&b!==m.text)parts.push(String(b));
  return parts.join(' · ');
 }
@@ -838,7 +838,7 @@ function focusMessage(incident,agent){
  else if(incident)toast(`${incident} is no longer on the map.`);
 }
 function decisionHTML(item,row){
- let html='';const ld=item.last_decision,recent=(Array.isArray(state.decisions)?state.decisions:[]).filter(d=>d.agent===item.id).slice(-5).reverse();
+ let html='';const ld=item.last_decision,recent=(Array.isArray(state.decisions)?state.decisions:[]).filter(d=>d.agent===item.id||d.drone_id===item.id).slice(-5).reverse();
  if(!ld&&!recent.length)return '';
  html+='<div class="detail-divider"></div><p class="doing-now"><b>Agent decision</b></p>';
  if(ld){const o=typeof ld==='object'?ld:{decision:ld};html+=row('Decision',nice(o.decision??o.action??'—'))+(o.reason?row('Reason',nice(o.reason)):'')+((o.options||[]).length?row('Options',o.options.slice(0,4).map(x=>`${x.id} ${x.score!=null?Number(x.score).toFixed(2):''}`).join(' · ')):'')}
@@ -865,8 +865,74 @@ function renderScenarioOptions(current){
 
 window.__ops={region,proc,traffic,get trafficCount(){return traffic.count},get trafficDrawn(){return traffic.drawn||0},resourceObjects,incidentObjects,select,flyTo,get camDist(){return camDist},renderer,THREE,get world(){return worldData},peopleObjects,searchGroup,camera,controls,groundHeight,get state(){return state},get selected(){return selected},get flying(){return !!flight},droneObjects,signalObjects,dockObjects,footObjects,routeLines};
 
+/* ====================== live operations log (virtualised) ====================== */
+const LOG={rows:[],keys:new Set(),textKeys:new Set(),filtered:[],filter:'all',q:'',live:true,ROW:46,open:true,w:380,ver:0,drawn:'',unseen:0,CAP:6000,dirty:false};
+const LOG_GLYPH={task:['→','k-blue'],accept:['✓','k-ok'],decline:['×','k-bad'],report:['·','k-mute'],status:['·','k-mute'],resource_request:['+','k-warn'],ack:['✓','k-ok'],cancel:['×','k-mute'],handoff:['⇄','k-blue'],decision:['◆','k-blue'],
+ incident:['!','k-warn'],sos:['!','k-bad'],briefing:['i','k-blue'],dispatch:['↗','k-blue'],arrival:['●','k-ok'],recall:['↩','k-mute'],supply_request:['+','k-warn'],fault:['!','k-bad'],crash:['!','k-bad'],flood_routes:['≈','k-mute']};
+const LOG_ALERT=/fault|crash|fail|declin|link|battery|lost|sos|blocked|critical|unavailable|collision|emergency|incident|degraded|closed/i,LOG_CMD=/command|disruption|control|dispatch/i;
+function logTags(r,resIds){
+ const t=new Set(),agent=String(r.agent||r.actor||''),text=r.text||'';
+ if(r.src==='decision')t.add('decisions');
+ if(r.src==='message'||LOG_CMD.test(String(r.actor))||['task','ack','cancel','handoff','briefing','dispatch'].includes(r.kind))t.add('command');
+ if(LOG_ALERT.test(r.kind)||(r.kind!=='accept'&&/fault|crash|declin|link loss|low battery|sos|failed/i.test(text)))t.add('alerts');
+ if(/^D\d+/i.test(agent)||/^D\d+\b/.test(text)||r.src==='decision'&&/^D\d+/i.test(String(r.agent||''))||r.from_type==='drone')t.add('swarm');
+ if(resIds.has(agent)||/\b(PC-[A-Z]+-?\d*|R\d{2}|ambulance|fire (engine|tender)|rescue team|boat|JCB|tanker)\b/i.test(text)||['arrival','dispatch','handoff'].includes(r.kind)&&!/^D\d+/i.test(agent))t.add('agencies');
+ if(r.src==='message'&&!t.has('swarm')&&/swarm|^D\d+/i.test(String(r.meta||'')))t.add('swarm');
+ return t;
+}
+function logReset(){LOG.rows=[];LOG.keys.clear();LOG.textKeys.clear();LOG.filtered=[];LOG.ver++;LOG.unseen=0;LOG.live=true;LOG.dirty=true}
+function ingestLog(st){
+ const out=[],resIds=new Set((st.resources||[]).map(r=>r.id));
+ const add=(src,id,r)=>{const key=src+':'+id;if(LOG.keys.has(key))return;LOG.keys.add(key);const tk=Math.round(r.t||0)+'|'+(r.text||'');if(src!=='m'&&src!=='d'&&LOG.textKeys.has(tk))return;LOG.textKeys.add(tk);r.src=src==='e'?'event':src==='s'?'signal':src==='m'?'message':'decision';r.tags=null;out.push(r)};
+ for(const e of st.events||[])add('e',e.id??`${e.time}|${e.message}`,{t:e.time||0,kind:e.kind||'event',actor:e.drone_id||e.resource_id||e.actor||'',text:e.message||'',incident:e.incident_id,agent:e.drone_id||e.resource_id||''});
+ for(const s of st.signals||[])if(s?.id!=null)add('s',s.id,{t:s.t||0,kind:s.kind||'signal',actor:s.from_id||s.from_type||'',text:s.text||nice(s.kind),incident:s.incident_id,agent:s.from_id,from_type:s.from_type});
+ for(const m of st.messages||[]){if(m?.id==null)continue;const cmd=isCommandName(m.from);add('m',m.id,{t:m.t||0,kind:m.kind||'status',actor:m.from||'',text:m.text||fmtBody(m)||nice(m.kind),meta:`${m.from||'?'} → ${m.to||'all'}`,incident:m.incident_id,agent:cmd?m.to:m.from})}
+ for(const d of st.decisions||[]){const id=d.id??`${d.t}|${d.agent}|${d.decision}|${d.incident_id||''}`,why=d.why||d.reason||d.summary||'';add('d',id,{t:d.t||0,kind:'decision',actor:d.drone_id||d.agent||'swarm',agent:d.drone_id||d.agent,text:nice(d.decision||d.kind)+(d.incident_id?` for ${d.incident_id}`:''),why,incident:d.incident_id,options:d.options,routine:/^(search|patrol|hold|idle|continue|charge|return|scan|wait)/i.test(String(d.decision||d.kind||''))})}
+ if(!out.length)return;
+ out.sort((a,b)=>(a.t||0)-(b.t||0));
+ for(const r of out){r.tags=logTags(r,resIds);LOG.rows.push(r)}
+ if(LOG.rows.length>LOG.CAP)LOG.rows.splice(0,LOG.rows.length-LOG.CAP);
+ LOG.ver++;LOG.dirty=true;if(!LOG.live)LOG.unseen+=out.length;
+}
+function logRefilter(){const f=LOG.filter,q=LOG.q.trim().toLowerCase();LOG.filtered=LOG.rows.filter(r=>(f==='all'?!r.routine:r.tags.has(f))&&(!q||(r.text+' '+(r.actor||'')+' '+(r.why||'')+' '+(r.incident||'')+' '+r.kind).toLowerCase().includes(q)))}
+function renderLog(force){
+ const panel=$('oplog');if(!LOG.open||!panel)return;const sc=$('oplog-scroll');
+ if(LOG.dirty||force){logRefilter();LOG.dirty=false;$('oplog-count').textContent=LOG.filtered.length;$('oplog-spacer').style.height=LOG.filtered.length*LOG.ROW+'px';if(LOG.live)sc.scrollTop=sc.scrollHeight}
+ const n=LOG.filtered.length,H=LOG.ROW,top=sc.scrollTop,vh=sc.clientHeight||400,a=Math.max(0,Math.floor(top/H)-4),b=Math.min(n,Math.ceil((top+vh)/H)+4),sig=a+':'+b+':'+LOG.ver+':'+LOG.filter+':'+LOG.q+':'+n;
+ if(sig===LOG.drawn&&!force)return;LOG.drawn=sig;
+ let html='';
+ if(!n)html=`<div class="logempty">${LOG.q||LOG.filter!=='all'?'Nothing matches this filter yet.':'Waiting for activity…'}</div>`;
+ for(let i=a;i<b;i++){const r=LOG.filtered[i],g=LOG_GLYPH[r.kind]||['·','k-mute'],meta=[r.actor,r.meta&&r.meta!==r.actor?r.meta:'',nice(r.kind),r.incident].filter(Boolean).filter((v,j,arr)=>arr.indexOf(v)===j).join(' · ');
+  html+=`<div class="logrow" role="button" tabindex="0" data-i="${i}" style="top:${i*H}px"><time>${clock(r.t)}</time><i class="glyph ${g[1]}">${g[0]}</i><span class="logmain"><span class="logtext" title="${escapeHTML(r.text)}">${escapeHTML(r.text)}</span><span class="logmeta">${escapeHTML(r.why?`why: ${r.why}`:meta)}</span></span></div>`}
+ $('oplog-rows').innerHTML=html;
+ const jump=$('oplog-jump');jump.hidden=LOG.live;jump.textContent=LOG.unseen?`Jump to live · ${LOG.unseen} new`:'Jump to live';$('oplog-live').classList.toggle('paused',!LOG.live);$('oplog-live').title=LOG.live?'Following live':'Paused - scroll to the end to follow';
+}
+{
+ const sc=$('oplog-scroll'),viewport=host.parentElement;let raf=0;const kick=()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;renderLog()})};
+ sc.addEventListener('scroll',()=>{const live=sc.scrollHeight-sc.scrollTop-sc.clientHeight<40;if(live!==LOG.live){LOG.live=live;if(live)LOG.unseen=0;LOG.drawn=''}kick()},{passive:true});
+ $('oplog-jump').onclick=()=>{LOG.live=true;LOG.unseen=0;sc.scrollTop=sc.scrollHeight;LOG.drawn='';renderLog(true)};
+ $('oplog-filters').addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;LOG.filter=b.dataset.f;for(const x of $('oplog-filters').children)x.classList.toggle('active',x===b);LOG.live=true;LOG.dirty=true;renderLog(true)});
+ let qt=0;$('oplog-search').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{LOG.q=e.target.value;LOG.dirty=true;renderLog(true)},120)});
+ const act=el=>{const r=LOG.filtered[Number(el.dataset.i)];if(r)focusMessage(r.incident,r.agent)};
+ $('oplog-rows').addEventListener('click',e=>{const el=e.target.closest('.logrow');if(el)act(el)});
+ $('oplog-rows').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const el=e.target.closest('.logrow');if(el){e.preventDefault();act(el)}}});
+ const setOpen=on=>{LOG.open=on;$('oplog').hidden=!on;viewport.classList.toggle('log-closed',!on);viewport.style.setProperty('--log-offset',on?(LOG.w+16)+'px':'0px');const t=$('toggle-log');t.classList.toggle('active',on);t.setAttribute('aria-pressed',String(on));try{localStorage.setItem('ops-log-open',on?'1':'0')}catch{}if(on){LOG.drawn='';LOG.dirty=true;requestAnimationFrame(()=>renderLog(true))}};
+ const setWidth=w=>{LOG.w=Math.max(300,Math.min(Math.min(720,viewport.clientWidth-340),w));viewport.style.setProperty('--log-w',LOG.w+'px');if(LOG.open)viewport.style.setProperty('--log-offset',(LOG.w+16)+'px')};
+ $('toggle-log').onclick=()=>setOpen(!LOG.open);$('oplog-close').onclick=()=>setOpen(false);$('oplog-open').onclick=()=>setOpen(true);
+ const rz=$('oplog-resize');rz.addEventListener('pointerdown',e=>{rz.setPointerCapture(e.pointerId);rz.classList.add('drag');viewport.style.setProperty('--ease','linear')});
+ rz.addEventListener('pointermove',e=>{if(!rz.classList.contains('drag'))return;setWidth(viewport.getBoundingClientRect().right-e.clientX-16);LOG.drawn=''});
+ rz.addEventListener('pointerup',e=>{rz.classList.remove('drag');viewport.style.removeProperty('--ease');try{localStorage.setItem('ops-log-w',String(LOG.w))}catch{}kick()});
+ rz.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'){setWidth(LOG.w+24);e.preventDefault()}if(e.key==='ArrowRight'){setWidth(LOG.w-24);e.preventDefault()}});
+ let w=380,open=innerWidth>=1200;try{w=Number(localStorage.getItem('ops-log-w'))||380;const o=localStorage.getItem('ops-log-open');if(o!=null)open=o==='1'}catch{}
+ setWidth(w);setOpen(open);new ResizeObserver(kick).observe(sc);
+ window.__log=LOG;
+}
+/* dark / light scene follows the system appearance */
+{const mq=matchMedia('(prefers-color-scheme: dark)'),apply=()=>{const css=getComputedStyle(document.documentElement);const bg=css.getPropertyValue('--scene').trim(),fog=css.getPropertyValue('--scene-fog').trim();scene.background=new THREE.Color(bg);scene.fog.color.set(fog)};apply();mq.addEventListener?.('change',apply)}
+
+
 /* ====================== frame loop ====================== */
-let previous=performance.now();
+let previous=performance.now(),lastLogDraw=0;
 function animate(now){
  requestAnimationFrame(animate);const dt=Math.min((now-previous)/1000,.05);previous=now;const live=connected&&!state?.paused;
  if(waterMaterial&&live)waterMaterial.uniforms.time.value+=dt;
@@ -875,6 +941,7 @@ function animate(now){
  if(cameraMode==='follow'&&selected&&!flight){const o=droneObjects.get(selected.id)||resourceObjects.get(selected.id);if(o){const delta=o.position.clone().sub(controls.target);controls.target.lerp(o.position,.07);camera.position.addScaledVector(delta,.07)}}
  controls.update();clampCamera();
  if(uiDirty&&state&&now-lastUI>250){renderUI();lastUI=now}
+ if(LOG.dirty&&now-lastLogDraw>200){lastLogDraw=now;renderLog()}
  renderer.render(scene,camera);declutter(now);
  if(connected&&now-lastPacket>7000)setConnection(false,'No recent telemetry · displaying last received state');
 }
