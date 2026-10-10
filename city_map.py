@@ -6,17 +6,19 @@ import pybullet as p
 ROOT=Path(__file__).parent
 READY=ROOT/'assets'/'city-ready'
 
+PLACEMENTS=[('building-01',[-10,6.75,0]),('building-02',[-4.75,7.25,0]),
+            ('building-03',[3.75,7,0]),('building-04',[-8,-5,0]),
+            ('building-05',[3.75,-7.5,0]),('building-06',[-13,-5.5,0]),
+            ('building-07',[11,-6,0]),
+            ('wreckage-3-types',[-4,-1.25,0]),
+            ('wreckage-3-types',[1,-1.25,0]),
+            ('wreckage-3-types',[6,-1.25,0])]
+
 def load_city(client):
+
     manifest=json.loads((READY/'manifest.json').read_text())
-    placements=[('building-01',[-10,6.75,0]),('building-02',[-4.75,7.25,0]),
-                ('building-03',[3.75,7,0]),('building-04',[-8,-5,0]),
-                ('building-05',[3.75,-7.5,0]),('building-06',[-13,-5.5,0]),
-                ('building-07',[11,-6,0]),
-                ('wreckage-3-types',[-4,-1.25,0]),
-                ('wreckage-3-types',[1,-1.25,0]),
-                ('wreckage-3-types',[6,-1.25,0])]
     textures={}
-    for name,position in placements:
+    for name,position in PLACEMENTS:
         asset=manifest[name]
         collision=p.createCollisionShape(p.GEOM_MESH,fileName=str(READY/asset['collision']),flags=p.GEOM_FORCE_CONCAVE_TRIMESH,physicsClientId=client)
         collider=p.createMultiBody(baseMass=0,baseCollisionShapeIndex=collision,basePosition=position,physicsClientId=client)

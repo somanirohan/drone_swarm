@@ -33,3 +33,5 @@ assets/apocalyptic-city/**/fbx files/
 # Keep vendored model textures and reference figures
 !gym-pybullet-drones/**/*.png
 !assets/**/*.png
+.cache/
+.tools/

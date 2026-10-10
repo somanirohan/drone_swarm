@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drone Swarm Live</title>
+<style>
+  :root{--bg:#0e1316;--panel:rgba(14,19,22,.82);--line:#26323a;--text:#e6edf0;--dim:#8a9ba5;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--accent:#38bdf8}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  canvas{display:block}
+  .panel{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(6px);padding:10px 12px}
+  #hud{top:12px;left:12px;min-width:230px}
+  #hud h1{margin:0 0 6px;font-size:14px;letter-spacing:.04em}
+  #hud .row{display:flex;justify-content:space-between;gap:16px}
+  #hud .row span:first-child{color:var(--dim)}
+  #conn{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:6px}
+  #conn.on{background:var(--ok)}
+  #phase{margin-top:6px;color:var(--accent);font-weight:600;word-break:break-word}
+  #cams{margin-top:8px;display:flex;gap:6px}
+  button{background:#1b252b;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+  button:hover,button.on{border-color:var(--accent);color:var(--accent)}
+  #fleet{top:12px;right:12px;width:200px;max-height:calc(100% - 24px);overflow:auto}
+  .drone{display:grid;grid-template-columns:34px 1fr 34px;gap:6px;align-items:center;margin:3px 0;font-size:12px}
+  .bar{height:5px;background:#1b252b;border-radius:3px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--ok)}
+  .st{font-size:10px;color:var(--dim);grid-column:2/4;margin-top:-3px}
+  #log{left:12px;bottom:12px;width:min(420px,calc(100% - 24px));max-height:150px;overflow:auto;font:11px/1.5 ui-monospace,Consolas,monospace;color:var(--dim)}
+  #log div b{color:var(--text);font-weight:500}
+  #loading{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);transition:opacity .5s;z-index:5}
+  #loading.done{opacity:0;pointer-events:none}
+  @media(max-width:700px){#fleet{display:none}}
+</style>
+</head>
+<body>
+<div id="loading"><div id="loadmsg">Loading district&hellip;</div></div>
+<div id="hud" class="panel">
+  <h1><span id="conn"></span>DRONE SWARM LIVE</h1>
+  <div class="row"><span>Mode</span><span id="mode">-</span></div>
+  <div class="row"><span>Mission time</span><span id="time">0s</span></div>
+  <div class="row"><span>Sites located</span><span id="found">0/3</span></div>
+  <div class="row"><span>Supplies landed</span><span id="deliv">0/3</span></div>
+  <div id="phase">connecting&hellip;</div>
+  <div id="cams"><button id="camOver" class="on">Overview</button><button id="camFollow">Follow swarm</button></div>
+</div>
+<div id="fleet" class="panel"></div>
+<div id="log" class="panel"></div>
+
+<script type="importmap">{"imports":{"three":"/web/vendor/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {OBJLoader} from '/web/vendor/OBJLoader.js';
+import {OrbitControls} from '/web/vendor/OrbitControls.js';
+
+const $=id=>document.getElementById(id);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9fb4c2);
+scene.fog=new THREE.Fog(0x9fb4c2,45,120);
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,300);
+camera.position.set(0,24,26);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.target.set(0,1,0);
+controls.maxPolarAngle=Math.PI*.49;
+controls.update();
+scene.add(new THREE.HemisphereLight(0xffffff,0x6b6258,1.5));
+const sun=new THREE.DirectionalLight(0xfff1dc,2.2);
+sun.position.set(-12,24,10);
+scene.add(sun);
+// Simulation is Z-up; this root maps it into three.js Y-up.
+const world=new THREE.Group();
+world.rotation.x=-Math.PI/2;
+scene.add(world);
+
+const loader=new THREE.TextureLoader();
+const texCache={};
+const tex=path=>texCache[path]??=(()=>{const t=loader.load('/'+path);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.colorSpace=THREE.SRGBColorSpace;return t})();
+const box=(w,d,h,color,x,y,z,map)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,d,h),new THREE.MeshLambertMaterial(map?{color,map}:{color}));m.position.set(x,y,z);world.add(m);return m};
+
+function label(text,color='#ffffff',scale=1){
+  const c=document.createElement('canvas');c.width=256;c.height=64;
+  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthTest:false}));
+  sprite.scale.set(2.4*scale,.6*scale,1);
+  sprite.userData={c,color,text:null};
+  setLabel(sprite,text);
+  return sprite;
+}
+function setLabel(s,text){
+  if(s.userData.text===text)return;
+  s.userData.text=text;
+  const c=s.userData.c,g=c.getContext('2d');
+  g.clearRect(0,0,256,64);
+  g.font='600 28px system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
+  g.lineWidth=6;g.strokeStyle='rgba(0,0,0,.65)';g.strokeText(text,128,32);
+  g.fillStyle=s.userData.color;g.fillText(text,128,32);
+  s.material.map.needsUpdate=true;
+}
+
+const drones=[];let droneTargets=[];
+const payloads={};const survivorMarks=[];
+const stateColor={TAKEOFF:0xffffff,EXPLORE:0x38bdf8,DELIVER:0xfbbf24,RELAY:0xa78bfa,RETURN:0x9ca3af,COMPLETE:0x4ade80,SCRIPTED:0x38bdf8};
+let built=false,meta=null;
+
+async function build(m){
+  meta=m;
+  const [gx,gy]=m.ground;
+  box(gx*2,gy*2,.1,0xffffff,0,0,-.05,tex('assets/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg')).material.map.repeat.set(8,6);
+  box(32,1.9,.025,0x2a2d2f,0,-1.25,.012);box(1.8,25,.026,0x2a2d2f,-1.75,0,.013);
+  for(let x=-15.5;x<16;x+=2)box(1.1,.07,.01,0xc9ba82,x,-1.25,.03);
+  for(let y=-12;y<12;y+=2)box(.07,1.1,.01,0xc9ba82,-1.75,y,.032);
+  box(4,2.6,.05,0x3d453d,m.launch_pad[0],m.launch_pad[1],.025);
+  const pad=label('RESCUE LAUNCH','#9be7b8');pad.position.set(m.launch_pad[0],m.launch_pad[1],1.6);world.add(pad);
+
+  const objLoader=new OBJLoader();
+  const cache={};
+  const loadPart=url=>cache[url]??=new Promise((res,rej)=>objLoader.load(url,res,undefined,rej));
+  const jobs=[];
+  for(const [name,pos] of m.placements){
+    for(const part of m.manifest[name].parts){
+      jobs.push(loadPart('/assets/city-ready/'+part.mesh).then(obj=>{
+        const copy=obj.clone();
+        const mat=new THREE.MeshLambertMaterial({map:tex(part.texture),side:THREE.DoubleSide});
+        copy.traverse(o=>{if(o.isMesh)o.material=mat});
+        copy.position.set(...pos);world.add(copy);
+      }));
+    }
+  }
+  m.survivors.forEach((s,k)=>{
+    const g=new THREE.Group();g.position.set(...s);
+    const body=new THREE.Mesh(new THREE.BoxGeometry(.36,.24,1.2),new THREE.MeshLambertMaterial({color:0xff2d2d}));body.position.z=.6;
+    const head=new THREE.Mesh(new THREE.SphereGeometry(.22,16,12),new THREE.MeshLambertMaterial({color:0xffb380}));head.position.z=1.4;
+    g.add(body,head);
+    const tag=label(`HELP ${k+1}`,'#ff6b6b');tag.position.z=2.3;g.add(tag);
+    world.add(g);survivorMarks.push({tag,k});
+  });
+  for(let i=0;i<m.drones;i++){
+    const g=new THREE.Group();
+    const S=4; // exaggerate the 9 cm Crazyflie so it is visible from the overview
+    const mat=new THREE.MeshLambertMaterial({color:0x38bdf8});
+    const body=new THREE.Mesh(new THREE.BoxGeometry(.04*S,.04*S,.02*S),mat);g.add(body);
+    for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+      const arm=new THREE.Mesh(new THREE.CylinderGeometry(.015*S,.015*S,.006*S,12),new THREE.MeshLambertMaterial({color:0x222222}));
+      arm.rotation.x=Math.PI/2;arm.position.set(dx*.05*S,dy*.05*S,.012*S);g.add(arm);
+    }
+    const tag=label(`D${i+1}`,'#bfe9ff',.7);tag.position.z=.55;g.add(tag);
+    world.add(g);
+    drones.push({g,mat,tag,pos:new THREE.Vector3(),quat:new THREE.Quaternion(),tp:new THREE.Vector3(),tq:new THREE.Quaternion(),init:false});
+  }
+  built=true;
+  $('loading').classList.add('done');
+  $('mode').textContent=m.mode;
+  $('fleet').innerHTML=Array.from({length:m.drones},(_,i)=>`<div class="drone"><b>D${i+1}</b><div class="bar"><i id="b${i}" style="width:100%"></i></div><span id="p${i}"></span><div class="st" id="s${i}">-</div></div>`).join('');
+  await Promise.all(jobs).catch(e=>console.error('mesh load failed',e));
+}
+
+function logLine(msg){
+  const el=$('log');
+  const d=document.createElement('div');
+  const m=msg.match(/^([A-Z ]+):(.*)$/);
+  d.innerHTML=m?`<b>${m[1]}</b>:${m[2].replace(/</g,'&lt;')}`:msg.replace(/</g,'&lt;');
+  el.appendChild(d);
+  while(el.children.length>60)el.removeChild(el.firstChild);
+  el.scrollTop=el.scrollHeight;
+}
+
+let lastT=0;
+function onFrame(f){
+  if(!built)return;
+  if(f.t<lastT-1){for(const k in payloads){world.remove(payloads[k]);delete payloads[k]}drones.forEach(d=>d.init=false)}
+  lastT=f.t;
+  $('time').textContent=Math.round(f.t)+'s';
+  $('found').textContent=f.found.length+'/3';
+  $('deliv').textContent=f.delivered.length+'/3';
+  $('phase').textContent=f.phase;
+  f.drones.forEach((d,i)=>{
+    const dr=drones[i];if(!dr)return;
+    dr.tp.set(d[0],d[1],d[2]);dr.tq.set(d[3],d[4],d[5],d[6]);
+    if(!dr.init){dr.pos.copy(dr.tp);dr.quat.copy(dr.tq);dr.init=true}
+    const state=d[7];
+    dr.mat.color.setHex(d[9]?(stateColor[state]??0x38bdf8):0xf87171);
+    setLabel(dr.tag,`D${i+1} ${d[9]?state:'OFFLINE'}`);
+    $('b'+i).style.width=Math.round(d[8]*100)+'%';
+    $('b'+i).style.background=d[8]<.3?'var(--bad)':d[8]<.5?'var(--warn)':'var(--ok)';
+    $('s'+i).textContent=state+(d[9]?'':' (unavailable)');
+    $('p'+i).textContent=Math.round(d[8]*100)+'%';
+  });
+  for(const [k,pos] of Object.entries(f.payloads)){
+    if(!payloads[k]){
+      payloads[k]=new THREE.Mesh(new THREE.BoxGeometry(.25,.25,.2),new THREE.MeshLambertMaterial({color:0xf3e6d6}));
+      world.add(payloads[k]);
+    }
+    payloads[k].position.set(...pos);
+  }
+  for(const s of survivorMarks){
+    const done=f.delivered.includes(s.k),seen=f.found.includes(s.k);
+    setLabel(s.tag,`HELP ${s.k+1}${done?' - SUPPLIED':seen?' - LOCATED':''}`);
+    s.tag.userData.color=done?'#4ade80':seen?'#fbbf24':'#ff6b6b';
+  }
+}
+
+// camera modes
+let follow=false;
+const setCam=f=>{follow=f;$('camFollow').classList.toggle('on',f);$('camOver').classList.toggle('on',!f)};
+$('camOver').onclick=()=>{setCam(false);controls.target.set(0,1,0);camera.position.set(0,24,26)};
+$('camFollow').onclick=()=>setCam(true);
+
+const tmp=new THREE.Vector3();
+renderer.setAnimationLoop(()=>{
+  for(const d of drones){
+    if(!d.init)continue;
+    d.pos.lerp(d.tp,.3);d.quat.slerp(d.tq,.3);
+    d.g.position.copy(d.pos);d.g.quaternion.copy(d.quat);
+  }
+  if(follow&&drones[0]?.init){
+    tmp.set(0,0,0);let n=0;for(const d of drones){if(d.init){tmp.add(d.pos);n++}}
+    tmp.divideScalar(n);
+    // simulation (x,y,z) -> three (x,z,-y)
+    const t=new THREE.Vector3(tmp.x,tmp.z,-tmp.y);
+    const before=controls.target.clone();
+    controls.target.lerp(t,.08);
+    camera.position.add(controls.target.clone().sub(before));
+  }
+  controls.update();
+  renderer.render(scene,camera);
+});
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+
+// websocket with auto-reconnect (the server restarts the scenario after each mission)
+function connect(){
+  const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  ws.onopen=()=>{$('conn').classList.add('on')};
+  ws.onclose=()=>{$('conn').classList.remove('on');$('phase').textContent='reconnecting…';setTimeout(connect,1500)};
+  ws.onmessage=async e=>{
+    const m=JSON.parse(e.data);
+    if(m.type==='init'){
+      if(!built&&!meta)await build(m.scene);
+      $('log').innerHTML='';m.log.forEach(logLine);
+    }else if(m.type==='frame')onFrame(m);
+    else if(m.type==='log')logLine(m.message);
+  };
+}
+connect();
+</script>
+</body>
+</html>
