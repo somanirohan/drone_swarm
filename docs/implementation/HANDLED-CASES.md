@@ -91,9 +91,9 @@ For **link loss**, the aircraft freezes in `lost_link`; incident ownership is re
 
 ## 11. “Twenty drones have no area assigned—how do they choose work?”
 
-Eligible idle aircraft claim different configured observation points. Unobserved and older observed points are considered before recently visited ones; distance breaks ties. A blocked candidate is skipped so an aircraft can try the next feasible point. Patrolling aircraft can be reassigned to an incident.
+The district is a 100 m search grid with a shared probability map (prior higher near the river, in dense blocks and around reported incidents). Usable aircraft get a Voronoi zone of cells, recomputed only when an aircraft joins or fails. Each searcher flies to the most likely cell in its own zone and sweeps it with a two-lane boustrophedon pattern; a sensor footprint (altitude × tan 30°) passing over a cell lowers its probability, which slowly relaxes back. When a sweep ends the aircraft goes straight to its next cell (no hovering in "ready"). Searchers win incidents through the same bid (ETA + energy share) and keep their zone to resume afterwards.
 
-The current demo uses 25 configured observation points. Additional aircraft can remain as reserve rather than being given duplicate patrol claims. A timestamp records a waypoint visit, not a verified camera footprint or exhaustive search of every building.
+With more aircraft than cells, the extra aircraft stay in reserve. The footprint is a geometric model, not verified camera detection.
 
 **Handled:** distinct patrol claims, revisit priority and interruption of patrol for incident response. **Limit:** all these agents share one authoritative process. Distributed auctions, radio-mesh consensus and coordinator-failure recovery are not implemented here.
 
@@ -101,7 +101,7 @@ The current demo uses 25 configured observation points. Additional aircraft can 
 
 This particular race is **not implemented**. The allocator normally assigns one aircraft per incident. Replacement happens after a confirmed crash or task release; there is no two-aircraft race, arrival-based ownership transfer or verified cancellation of the losing aircraft.
 
-An internal `detect` action can merge nearby same-category observations into an existing open incident and escalate severity/people counts, but **`detect` is not exposed by the public WebSocket whitelist**. It is not an arbitrary-incident creation API for your friend's application yet.
+`detect` (operator map click) and `random_incident` are now operator commands. Both go through the swarm's `agency_request` decision path (see section 15); `detect` still merges nearby same-category reports into an existing open incident.
 
 ## 13. “The browser disconnects or sends the same action twice.”
 
@@ -111,8 +111,22 @@ Command IDs deduplicate exact retries within the running server's 2,000-entry ca
 
 **Handled:** stale UI, reconnect, bounded viewer backlog, duplicate commands and event replay. **Limit:** command acknowledgments and simulation state are not persisted across server restarts; the event journal is durable but not a complete event-sourced simulator.
 
+## 14. "A fire is reported; drones wait in docks and only the best two or three launch" (`dock_fire`)
+
+Aircraft start on their own landing pads at 3–8 docks spread over dry roads. At most `DOCK_DISPATCH_CAP = 3` are airborne at once, and every other aircraft stays docked. Each incident gets the best feasible aircraft: path, recovery and energy are checked, and a stocked supply aircraft is preferred. An aircraft returns to its own pad and recharges/reloads there. The scenario has 2 or 3 incidents depending on the seed: a building fire (fire engine), a smoke casualty on the street (ambulance) and optionally trapped residents (rescue).
+
+Ground units are the real PCMC/PCCOE units from DisruptionOps migration `029_pcmc_pccoe_zone` (`assets/operations/agency-catalog.json`): ids such as `PC-FIRE-01`, operator, station and real coordinates. Units outside the 1.2 km map wait at the map-edge road node nearest their real station. They pay a one-off approach delay of real distance ÷ ground speed (for example, "PC-FIRE-01 left Pradhikaran stn, Nigdi, ETA to district 53s"). Hospital transfers drive to the map edge toward the real hospital and add an off-map run. On-map shelters are used directly. Dispatch picks the nearest unit by real distance. If a unit frees up much nearer than the one still on its way, it takes over and the farther unit stands down (`ground_reassign`).
+
+**Ground-first vs drone-first.** Some seeds place an ambulance already patrolling near the casualty. If a crew arrives before any aircraft, it writes the briefing (`source: "ground crew"`). The en-route aircraft is then retasked to finish only its supply drop, or recalled to its dock with a `recall` signal and a `drone_recall` event. If the aircraft arrives first, it briefs every dispatched unit (one `briefing` signal each). For each outstanding supply, it names the nearest stocked aircraft or ground unit (`supply_request`). Once an incident has been assessed, a new aircraft launches only to bring a missing supply that a stocked aircraft carries, and only after a 20 s cooldown. This stops launch/return churn. Pinned examples (Pune world, fleet 20): seed 42 has I002 ground-first, and seed 91 is all drone-first.
+
+**Checked:** seeds 42/7/91 × fleets 5/10/20/25/40/50. Each takes ≈0.3–0.5 s to initialise. Peak airborne is ≤3, every incident resolves, and every aircraft ends on its own pad. **Limits:** off-map travel is straight-line distance at 9 m/s, not a real road route. The nearby-patrol ambulance is a scenario variation. Fire suppression is a timed service, not fire physics.
+
+## 15. "The swarm is an agency; DisruptionOps orchestrates"
+
+The orchestrator sends `agency_request` (sos/assess/supply/overwatch, idempotent `request_id`). The swarm accepts or declines with a reason (outside the area, no-fly zone, capacity, no energy-feasible aircraft, or launch cap for non-SOS requests). An accepted request returns an ETA, the assigned aircraft and a step plan. The swarm then raises `resource_request`s for the ground agencies the report implies. After the first aerial look it raises follow-ups, for example when more people are on scene than seats on the way. It drops what it carries itself and reports status events (`accepted`, `launched`, `on_scene`, `briefing`, `resource_request`, `supply_delivered`, `ground_arrived`, `retasked`/`recalled`, `handed_over`, `completed`). Standalone, the local units answer requests as a mock orchestrator. Two units at one incident never load the same people twice. `random_incident` and `detect` use the same path. **Limit:** request decisions are this process's rules, not a negotiated protocol with a live DisruptionOps instance.
+
 ## What has been checked
 
-The build has 27 domain tests, 22 actual localhost transport tests, 19 optional connector/adapter tests and 15 existing planner regressions. Nine recorded 50-aircraft scenario/fault replays completed the modeled agency response. Those results establish the checked cases, not every possible edge case or real flight safety. Dense approximately 90-airborne stress occasionally exceeds the 100 ms telemetry budget.
+The build has 41 domain tests (including dock_fire, agency-request and snapshot-contract tests), 24 actual localhost transport tests, 19 optional connector/adapter tests and 15 existing planner regressions. Nine recorded 50-aircraft scenario/fault replays completed the modeled agency response. Those results establish the checked cases, not every possible edge case or real flight safety. Dense approximately 90-airborne stress occasionally exceeds the 100 ms telemetry budget.
 
 Source files: `ops_simulation.py`, `operations_server.py`, `test_ops_simulation.py`, `test_operations_server.py`. Integration instructions: `FRIEND-WEBSOCKET-HANDOFF.md`.

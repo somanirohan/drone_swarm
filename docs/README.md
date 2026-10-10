@@ -1,0 +1,54 @@
+# Documentation index
+
+Reference DisruptionOps version for all integration documents: commit `bd21179` (clone `D:\drone_research_reference\DisruptionOps-latest`). The older `DisruptionOps` clone (`4e87ade`) is stale.
+
+## Start here
+
+| Document | One line |
+|---|---|
+| [PLAN.md](PLAN.md) | The user's requirements as numbered items, deliverables with acceptance tests, phases, risks, definition of done. |
+| [ALGORITHMS.md](ALGORITHMS.md) | The algorithms the engine really uses (A*, Dijkstra, bidding, zones, energy), with function names and honest limits, and what is not used. |
+| [CAPABILITIES.md](CAPABILITIES.md) | What works, what is partial, what is planned, and how each was verified. Honest about being a kinematic demo. |
+| [FOLDER-LAYOUT.md](FOLDER-LAYOUT.md) | Target folder structure, old-to-new move map, references to fix, safe order. Plan only; nothing moved. |
+
+## DisruptionOps integration (`integration/`)
+
+| Document | One line |
+|---|---|
+| [integration/disruptionops-migrations.md](integration/disruptionops-migrations.md) | All 29 migrations read and interpreted, the data model, where the swarm plugs in, a NOT APPLIED seed, and errors found in the earlier patch. |
+| [integration/how-disruptionops-calls-the-swarm.md](integration/how-disruptionops-calls-the-swarm.md) | HTTP and WebSocket contract, mission requests, report-back mapping to `events`, pause/hold handling, auth, failure behaviour. |
+| [integration/call-sequence.dot](integration/call-sequence.dot) | Graphviz source of the call sequence (render with `dot -Tsvg`). |
+
+## Existing implementation docs (`implementation/`)
+
+| Document | One line |
+|---|---|
+| [implementation/implementation-plan.md](implementation/implementation-plan.md) | Earlier plan and run instructions for the Pune simulator. Superseded in scope by PLAN.md. |
+| [implementation/websocket-protocol.md](implementation/websocket-protocol.md) | `disruptionops.swarm.v2` WebSocket and HTTP contract, including the agency/orchestrator commands. |
+| [implementation/FRIEND-WEBSOCKET-HANDOFF.md](implementation/FRIEND-WEBSOCKET-HANDOFF.md) | Full connection guide; section A has the new fields and commands, the view-only rule, and how to detect and plot a dispatched ambulance with real payloads. |
+| `../examples/operations_ws_client.py`, `../examples/operations-websocket-client.mjs` | Reference clients; print dispatches, signals, resource requests and agency metrics; optional `random_incident` with an operator token. |
+| [implementation/HANDLED-CASES.md](implementation/HANDLED-CASES.md) | Thirteen scenarios the engine handles, with limits. |
+| [implementation/validation.md](implementation/validation.md) | Test counts and commands from the last local verification. |
+| [implementation/disruptionops-integration.md](implementation/disruptionops-integration.md) | Earlier integration contract. **Partly outdated**: written against 4e87ade; see the migrations doc, section 8 and 9. |
+| `implementation/acceptance-results.json`, `browser-results.json` | Recorded results. |
+| `implementation/operations-architecture.dot` / `.svg` / `.png` | Architecture diagram of the simulator. |
+
+## Research (`research/100-drone-disaster-response/`)
+
+| Document | One line |
+|---|---|
+| [research/.../README.md](research/100-drone-disaster-response/README.md) | Entry point to the swarm architecture research. |
+| [research/.../architecture-study.md](research/100-drone-disaster-response/architecture-study.md) | How 100+ drone disaster systems work. |
+| [research/.../20-drone-decentralized-allocation.md](research/100-drone-disaster-response/20-drone-decentralized-allocation.md) | Decentralised task allocation, drawbacks and fixes. |
+| [research/.../repository-integration.md](research/100-drone-disaster-response/repository-integration.md) | Earlier repository findings; DisruptionOps parts predate bd21179. |
+| `research/.../sources.md`, `*.dot`, `*.svg`, `drawio/` | Sources and diagrams. |
+
+## Root-level guides (legacy PyBullet exercise)
+
+| Document | One line |
+|---|---|
+| [../README.md](../README.md) | Project overview and run commands. |
+| [../AGENTIC-GUIDE.md](../AGENTIC-GUIDE.md), [../AI-SWARM-GUIDE.md](../AI-SWARM-GUIDE.md) | Rule agents and optional AI planner for the 12-drone exercise. |
+| [../DISASTER-GUIDE.md](../DISASTER-GUIDE.md), [../DRONES-GUIDE.md](../DRONES-GUIDE.md), [../WEB-GUIDE.md](../WEB-GUIDE.md), [../FRIEND-GUIDE.md](../FRIEND-GUIDE.md) | Legacy map, setup, web hosting and the old feed spec. |
+| [../PRODUCTION-ARCHITECTURE.md](../PRODUCTION-ARCHITECTURE.md) | Early production architecture brief. |
+| [../resume.md](../resume.md) | The user's earlier conversation; source of the stated expectations. |

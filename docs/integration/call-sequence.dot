@@ -1,0 +1,45 @@
+// How DisruptionOps and the drone swarm call each other.
+// Steps marked (PROPOSED) do not exist yet; the rest exist today on one side or both.
+// Render: dot -Tsvg call-sequence.dot -o call-sequence.svg
+digraph call_sequence {
+  graph [rankdir=TB, fontname="Helvetica", fontsize=12, nodesep=0.5, ranksep=0.42, splines=true, newrank=true, label="DisruptionOps <-> drone swarm: one incident from report to handoff", labelloc=t];
+  node  [shape=box, style="rounded,filled", fillcolor="#ffffff", fontname="Helvetica", fontsize=10, margin="0.12,0.06"];
+  edge  [fontname="Helvetica", fontsize=9, color="#555555"];
+
+  subgraph cluster_ops {
+    label="DisruptionOps (FastAPI + Postgres)"; style="rounded,filled"; fillcolor="#eef3fb"; color="#7a93c0";
+    o1 [label="1  Report / SOS arrives\nintake.receive -> incident opened\n(person_stranded | fire | unknown_report ...)"];
+    o2 [label="2  Planner: ground units assigned\nfrom incident_needs (existing)"];
+    o3 [label="3  Request aerial look / supply\nevent drone.assessment_requested (PROPOSED)"];
+    o4 [label="6  Write observation back\nevents + mesh_nodes + road_blocks\n(existing doors)"];
+    o5 [label="8  Crew on site: staff acks briefing\nassignment on_site"];
+    o6 [label="9  Resolve incident (person)\nincident.resolved"];
+    o1 -> o2 -> o3 -> o4 -> o5 -> o6 [style=invis];
+  }
+
+  subgraph cluster_gate {
+    label="Control signals (DisruptionOps owns)"; style="rounded,filled"; fillcolor="#fff6e5"; color="#c9a13a";
+    g1 [label="control_state autonomy.paused\n(GET /api/v1/ops/autonomy, staff)"];
+    g2 [label="operator_overrides\nhold | pin | forbid"];
+    g1 -> g2 [style=invis];
+  }
+
+  subgraph cluster_swarm {
+    label="Drone swarm (operations_server.py /ops/ws)"; style="rounded,filled"; fillcolor="#eaf6ee"; color="#6aa97b";
+    s1 [label="4  Accept mission (PROPOSED)\nexternal_mission_request\nidempotent by id"];
+    s2 [label="5  Launch best docked drones (cap 2-3)\nfly, observe, brief\nincident.briefing r1"];
+    s3 [label="5b Supply drop if payload matches\nsupplied += item"];
+    s4 [label="7  Recall when ground ack matches\nbriefing revision\next. update / ack_handoff"];
+    s1 -> s2 -> s3 -> s4 [style=invis];
+  }
+
+  o1 -> o2 [label="existing"];
+  o3 -> s1 [label="WS command or\nmesh_outbox pull (PROPOSED)", color="#2b6cb0", fontcolor="#2b6cb0"];
+  s2 -> o4 [label="POST /ingest/sensor or\nintake source=sensor\n(idempotent by run_id:event_id)", color="#2f855a", fontcolor="#2f855a"];
+  s3 -> o4 [label="drone.payload_delivered", color="#2f855a", fontcolor="#2f855a"];
+  o2 -> s4 [label="resource state, assignment\non_site, handoff ack\n(external_resource_update)", color="#2b6cb0", fontcolor="#2b6cb0"];
+  o5 -> s4 [label="accepted briefing revision", color="#2b6cb0", fontcolor="#2b6cb0"];
+  g1 -> s1 [label="paused: refuse new missions,\nno recall, keep reporting", style=dashed, color="#b7791f", fontcolor="#b7791f"];
+  g2 -> s2 [label="hold/forbid: do not launch\nthis drone / this incident", style=dashed, color="#b7791f", fontcolor="#b7791f"];
+  s4 -> o6 [label="drone returns; incident stays open\nuntil agencies finish", style=dotted];
+}

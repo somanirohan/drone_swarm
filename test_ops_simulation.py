@@ -1,9 +1,12 @@
 """Meaningful dispatch, ownership and failure checks for the operations demo."""
 import copy
 import json
+import math
+import time
 import unittest
+from pathlib import Path
 
-from ops_simulation import OperationsSimulation, _default_world
+from ops_simulation import ACTIVITIES, BEHAVIORS, PERSON_STATUSES, OperationsSimulation, _default_world, _inside
 
 
 class OperationsTests(unittest.TestCase):
@@ -48,11 +51,34 @@ class OperationsTests(unittest.TestCase):
         resource["position"]=[*incident["position"][:2],0]
         resource["route"]=[]
         drone=next(d for d in sim.drones if d["id"]==incident["drone_id"])
+        drone["payload_stock"]=0  # nothing left to drop -> recall (not a supply retask)
         self.advance(sim,5)
         self.assertTrue(incident["handed_over"])
         self.assertEqual(incident["briefing"]["source"],"ground crew")
         self.assertEqual(drone["state"],"returning")
         self.assertNotEqual(incident["status"],"resolved")
+        self.assertTrue(any(e["kind"]=="drone_recall" for e in sim.events))
+        kinds=[s["kind"] for s in sim.snapshot()["signals"]]
+        self.assertIn("recall",kinds)
+        self.assertIn("briefing",kinds)
+
+    def test_ground_first_retasks_drone_that_still_carries_a_needed_supply(self):
+        sim=OperationsSimulation()
+        incident=sim.incidents[0]
+        resource=next(r for r in sim.resources if r["id"]==incident["resource_ids"][0])
+        resource["position"]=[*incident["position"][:2],0];resource["route"]=[]
+        drone=next(d for d in sim.drones if d["id"]==incident["drone_id"])
+        self.assertIn(drone["payload"],incident["needs"])
+        self.advance(sim,5)
+        self.assertEqual(incident["briefing"]["source"],"ground crew")
+        self.assertEqual(drone["state"],"enroute")
+        self.assertEqual(drone["retasked"],"supply")
+        self.assertIn(sim._activity(drone),("launching","delivering"))
+        self.assertEqual(sim._behavior(drone),"relay")
+        self.advance(sim,60)
+        self.assertIn(drone["payload"],incident["supplied"])
+        self.assertEqual(incident["briefing"]["source"],"ground crew","A supply drop must not overwrite the crew briefing")
+        self.assertIn(drone["state"],("returning","charging","ready"))
 
     def test_crashed_owner_is_replaced_without_losing_incident(self):
         sim=OperationsSimulation()
@@ -151,9 +177,11 @@ class OperationsTests(unittest.TestCase):
         self.assertIn("road_conditions",incremental)
 
     def test_outside_boundary_detection_does_not_send_aircraft_outside_mission(self):
-        sim=OperationsSimulation()
-        sim.command("detect",{"position":[1000,1000,0],"category":"medical"})
-        self.assertIsNone(sim.incidents[-1]["drone_id"])
+        sim=OperationsSimulation();count=len(sim.incidents)
+        result=sim.command("detect",{"position":[1000,1000,0],"category":"medical"})
+        self.assertFalse(result["ok"])
+        self.assertIn("operating area",result["error"])
+        self.assertEqual(len(sim.incidents),count,"a declined request creates no incident and sends no aircraft")
 
     def test_repeated_fault_cannot_reanimate_crashed_aircraft(self):
         sim=OperationsSimulation();identifier=sim.incidents[0]["drone_id"]
@@ -174,7 +202,9 @@ class OperationsTests(unittest.TestCase):
 
     def test_external_authority_requires_explicit_fresh_ack(self):
         sim=OperationsSimulation();incident=sim.incidents[0]
-        sim._brief(incident,next(d for d in sim.drones if d["id"]==incident["drone_id"]))
+        drone=next(d for d in sim.drones if d["id"]==incident["drone_id"])
+        drone["payload_stock"]=0  # no supply to finish, so an accepted handoff recalls it
+        sim._brief(incident,drone)
         payload={"source":"disruptionops","run_id":sim.run_id,"resources":[{"id":"OPS-R1","kind":"rescue","state":"on_site","position":[*incident["position"][:2],0],"incident_id":incident["id"]}],"handoffs":[]}
         self.assertTrue(sim.command("external_resource_update",payload)["ok"])
         self.advance(sim,5)
@@ -267,6 +297,234 @@ class OperationsTests(unittest.TestCase):
         engineer=next(r for r in sim.resources if r["kind"]=="engineering")
         sim._complete_service(engineer,incident)
         self.assertEqual(incident["status"],"resolved")
+
+
+PUNE=Path(__file__).resolve().parent/"assets"/"operations"/"pune-world.json"
+CATALOG=Path(__file__).resolve().parent/"assets"/"operations"/"agency-catalog.json"
+
+
+@unittest.skipUnless(PUNE.exists(),"prepared Pune world not present")
+class DockFireTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.world=json.loads(PUNE.read_text(encoding="utf8"))
+
+    def run_to_end(self,sim,limit=900):
+        peak=0
+        for _ in range(limit):
+            sim.step(1);peak=max(peak,sim._launched())
+            if all(i["status"]=="resolved" for i in sim.incidents) and all(d["state"] in ("ready","charging") for d in sim.drones):break
+        return peak
+
+    def first_on_scene(self,sim,incident_id):
+        for e in sim.events:
+            if e.get("incident_id")==incident_id and e["kind"] in ("briefing","ground_arrival"):
+                return "drone" if e["kind"]=="briefing" else "ground"
+
+    def test_init_is_fast_cap_holds_and_everything_resolves_and_docks(self):
+        for fleet in (5,50):
+            start=time.perf_counter()
+            sim=OperationsSimulation(self.world,seed=91,fleet_size=fleet,scenario="dock_fire")
+            self.assertLess(time.perf_counter()-start,3.0,"dock_fire init must stay well under a few seconds")
+            self.assertTrue(all(d["state"]=="ready" and d["position"]==d["home"] for d in sim.drones if d["task_id"] is None))
+            peak=self.run_to_end(sim)
+            self.assertLessEqual(peak,3)
+            self.assertTrue(all(i["status"]=="resolved" for i in sim.incidents))
+            for drone in sim.drones:
+                self.assertEqual(drone["position"],drone["home"],f"{drone['id']} must land on its own dock pad")
+                self.assertIn(drone["state"],("ready","charging"))
+            self.assertEqual(sim.snapshot()["metrics"]["dispatch_cap"],3)
+
+    def test_ground_first_ordering_seed_42(self):
+        sim=OperationsSimulation(self.world,seed=42,fleet_size=20,scenario="dock_fire")
+        self.run_to_end(sim)
+        self.assertEqual(self.first_on_scene(sim,"I002"),"ground")
+        self.assertEqual(sim._find_incident("I002")["briefing"]["source"],"ground crew")
+        self.assertTrue(any(e["kind"] in ("drone_retask","drone_recall") and e.get("incident_id")=="I002" for e in sim.events))
+        self.assertEqual(self.first_on_scene(sim,"I001"),"drone")
+
+    def test_drone_first_ordering_seed_91_briefs_every_dispatched_agency(self):
+        sim=OperationsSimulation(self.world,seed=91,fleet_size=20,scenario="dock_fire")
+        briefs=[]
+        for _ in range(60):
+            sim.step(1);briefs+=[s for s in sim.signals if s["kind"]=="briefing" and s["from_type"]=="drone" and s not in briefs]
+        for incident in sim.incidents:
+            self.assertEqual(self.first_on_scene(sim,incident["id"]),"drone")
+            recipients={rid for s in briefs if s["incident_id"]==incident["id"] for rid in s["to_ids"]}
+            self.assertTrue(set(incident["resource_ids"])<=recipients,f"{incident['id']} brief must reach every dispatched unit")
+
+    def test_units_are_real_pcmc_catalog_units(self):
+        catalog={c["source_id"]:c for c in json.loads(CATALOG.read_text(encoding="utf8"))["resources"]}
+        sim=OperationsSimulation(self.world,seed=42,fleet_size=10,scenario="dock_fire")
+        self.assertTrue(sim.resources)
+        for resource in sim.resources:
+            self.assertTrue(resource["id"].startswith("PC-"))
+            entry=catalog[resource["id"]]
+            self.assertEqual(resource["name"],entry["name"])
+            self.assertEqual(resource["agency"],entry["operator"])
+            self.assertEqual(resource["real_position"][:2],[round(v,1) for v in entry["local_xy"]])
+            if not entry["on_map"] and not resource.get("patrol"):
+                self.assertGreater(resource["approach_m"],0,"off-map units pay a real approach distance")
+        departures=[]
+        for _ in range(5):
+            sim.step(1)
+        departures=[e for e in sim.events if e["kind"]=="ground_departure"]
+        self.assertTrue(departures and "ETA to district" in departures[0]["message"])
+
+    def test_random_incident_is_reproducible_and_runs_the_full_chain(self):
+        a=OperationsSimulation(self.world,seed=5,fleet_size=10,scenario="dock_fire")
+        b=OperationsSimulation(self.world,seed=5,fleet_size=10,scenario="dock_fire")
+        ra=a.command("random_incident",{"category":"trapped"});rb=b.command("random_incident",{"category":"trapped"})
+        self.assertTrue(ra["ok"]);self.assertEqual(ra["position"],rb["position"])
+        self.assertNotEqual(a.command("random_incident",{"category":"trapped"})["position"],ra["position"])
+        incident=a._find_incident(ra["incident_id"])
+        self.assertIsNotNone(incident["building_id"])
+        self.assertTrue(any(s["kind"]=="sos" and s["incident_id"]==incident["id"] for s in a.signals))
+        self.assertTrue(incident["resource_ids"],"ground unit dispatched concurrently")
+        self.assertFalse(a.command("random_incident",{"category":"volcano"})["ok"])
+        self.run_to_end(a,1500)
+        self.assertEqual(incident["status"],"resolved")
+        self.assertTrue(incident["handed_over"])
+        self.assertTrue(any(e["kind"] in ("drone_launch","drone_retask","drone_recall") and e.get("incident_id")==incident["id"] for e in a.events))
+
+    def test_people_placement_is_believable(self):
+        sim=OperationsSimulation(self.world,seed=7,fleet_size=10,scenario="dock_fire")
+        people=sim.snapshot()["people"]
+        self.assertEqual(len(people),sum(i["people"] for i in sim.incidents))
+        for person in people:
+            incident=sim._find_incident(person["incident_id"])
+            if incident["category"] in ("fire","trapped"):
+                self.assertEqual(person["on"],"roof")
+                footprint=next(b for b in sim._building_index() if b[0]==person["building_id"])[2]
+                self.assertTrue(_inside(person["position"][:2],footprint))
+            else:
+                self.assertEqual(person["on"],"ground")
+                self.assertIsNone(sim._building_at(person["position"][:2]))
+        self.assertEqual(people,OperationsSimulation(self.world,seed=7,fleet_size=10,scenario="dock_fire").snapshot()["people"])
+
+
+class SnapshotContractTests(unittest.TestCase):
+    def test_drone_signal_search_and_people_fields(self):
+        sim=OperationsSimulation(fleet_size=10)
+        for _ in range(4):sim.step(1)
+        snap=sim.snapshot()
+        json.dumps(snap,allow_nan=False)
+        for drone in snap["drones"]:
+            self.assertIn(drone["activity"],ACTIVITIES)
+            self.assertIn(drone["behavior"],BEHAVIORS)
+            self.assertGreaterEqual(drone["sensor_radius_m"],0)
+            z=drone["position"][2]
+            if z>3:self.assertAlmostEqual(drone["sensor_radius_m"],z*math.tan(math.radians(30)),delta=.1)
+            self.assertLessEqual(drone["speed_mps"],18.01)
+            self.assertIsInstance(drone["zone"],list)
+        self.assertTrue(snap["signals"])
+        for signal in snap["signals"]:
+            self.assertEqual(set(signal),{"id","t","kind","from_type","from_id","to_ids","position","incident_id","text"})
+            self.assertIn(signal["kind"],("sos","briefing","ack","recall","dispatch","arrival","supply_request","resource_request"))
+            self.assertIn(signal["from_type"],("drone","resource","incident"))
+            self.assertLessEqual(snap["t"]-signal["t"],6)
+        self.assertTrue(snap["search_map"] and {"id","center","probability","last_observed","status"}<=set(snap["search_map"][0]))
+        self.assertTrue(all(p["status"] in PERSON_STATUSES for p in snap["people"]))
+        for _ in range(10):sim.step(1)
+        self.assertTrue(all(sim.t-s["t"]<=6 for s in sim.snapshot()["signals"]),"signals older than 6 sim-seconds are dropped")
+
+    def test_search_zones_partition_cells_and_observation_lowers_probability(self):
+        sim=OperationsSimulation(fleet_size=10)
+        zones=[set(d["zone"]) for d in sim.drones]
+        union=set().union(*zones)
+        self.assertEqual(sum(len(z) for z in zones),len(union),"zones are disjoint")
+        self.assertEqual(union,{c for c,cell in sim.search_cells.items() if not cell["blocked"]})
+        for drone in sim.drones:
+            if drone["state"]=="patrolling":self.assertIn(drone["search_target"],drone["zone"])
+        before={c:cell["p"] for c,cell in sim.search_cells.items()}
+        for _ in range(60):sim.step(1)
+        observed=[c for c,cell in sim.search_cells.items() if cell["last"] is not None]
+        self.assertTrue(observed)
+        self.assertTrue(any(sim.search_cells[c]["p"]<before[c]*.6 for c in observed))
+        crashed=sim.drones[0]["id"];sim.command("fault",{"drone_id":crashed,"kind":"crash"})
+        self.assertEqual(sim.drones[0]["zone"],[],"a failed aircraft's zone is redistributed")
+        self.assertEqual(set().union(*[set(d["zone"]) for d in sim.drones]),union)
+
+    def test_fleet_command_reinitialises_and_validates(self):
+        sim=OperationsSimulation(fleet_size=20);old=sim.run_id
+        self.assertTrue(sim.command("fleet",{"value":5})["ok"])
+        self.assertEqual(len(sim.drones),5);self.assertNotEqual(sim.run_id,old)
+        self.assertEqual(sim.scenario["id"],"rooftop_flood")
+        for bad in (0,101,True,2.5,"5",None,float("inf")):
+            self.assertFalse(sim.command("fleet",{"value":bad})["ok"],bad)
+        self.assertEqual(len(sim.drones),5)
+
+    def test_detect_snaps_and_returns_incident_id_with_open_cap(self):
+        sim=OperationsSimulation()
+        result=sim.command("detect",{"position":[-150,-160],"category":"trapped","people":3})
+        self.assertTrue(result["ok"])
+        incident=sim._find_incident(result["incident_id"])
+        self.assertEqual(incident["building_id"],"B3")
+        self.assertEqual(incident["position"][2],30.0,"roof height of the clicked building")
+        self.assertFalse(sim.command("detect",{"position":[0,"x"],"category":"medical"})["ok"])
+        added=0
+        while sim.command("random_incident",{"category":"medical"})["ok"]:added+=1
+        self.assertEqual(sum(i["status"]!="resolved" for i in sim.incidents),12)
+
+
+class AgencyRequestTests(unittest.TestCase):
+    def request(self,sim,request_id,**fields):
+        payload={"request_id":request_id,"kind":"sos","position":[-100,-200],"category":"medical","people":2,"needs":["first_aid"],"priority":4,"requested_by":"DisruptionOps"}
+        payload.update(fields)
+        return sim.command("agency_request",payload)
+
+    def test_accept_decline_and_idempotent_request_id(self):
+        sim=OperationsSimulation()
+        first=self.request(sim,"ORCH-1")
+        self.assertTrue(first["ok"]);self.assertTrue(first["accepted"])
+        self.assertTrue(first["plan"]);self.assertEqual(first["assigned_drones"],[sim._find_incident(first["incident_id"])["drone_id"]])
+        self.assertIsNotNone(first["eta_s"])
+        incident=sim._find_incident(first["incident_id"])
+        self.assertEqual(incident["source"],"orchestrator");self.assertEqual(incident["request_id"],"ORCH-1")
+        count=len(sim.incidents)
+        again=self.request(sim,"ORCH-1",position=[200,200])
+        self.assertTrue(again["duplicate"]);self.assertEqual(again["incident_id"],first["incident_id"]);self.assertEqual(len(sim.incidents),count)
+        outside=self.request(sim,"ORCH-2",position=[5000,0])
+        self.assertTrue(outside["ok"]);self.assertFalse(outside["accepted"]);self.assertIn("operating area",outside["reason"])
+        world=_default_world();world["no_fly"]=[{"center":[100,-100],"radius":60}]
+        restricted=self.request(OperationsSimulation(world),"ORCH-3",position=[100,-100])
+        self.assertFalse(restricted["accepted"]);self.assertIn("no-fly",restricted["reason"])
+        self.assertFalse(self.request(sim,"ORCH-4",kind="launch_missiles")["ok"])
+        metrics=sim.snapshot()["metrics"]["agency"]
+        self.assertEqual((metrics["requests_received"],metrics["accepted"],metrics["declined"]),(2,1,1))
+        statuses=[e.get("status") for e in sim.events]
+        self.assertIn("accepted",statuses);self.assertIn("declined",statuses);self.assertIn("resource_request",statuses)
+
+    def test_chain_accept_assess_request_resources_handover_complete(self):
+        sim=OperationsSimulation(fleet_size=10)
+        result=self.request(sim,"ORCH-CHAIN",position=[-200,-300],people=5,needs=["first_aid","medical"])
+        incident=sim._find_incident(result["incident_id"])
+        self.assertEqual(incident["resource_requests"][0]["needed_kind"],"ambulance")
+        for _ in range(900):
+            sim.step(1)
+            if incident["status"]=="resolved":break
+        self.assertEqual(incident["status"],"resolved")
+        self.assertIn(incident["first_on_scene"],("drone","ground"))
+        self.assertEqual(incident["evacuated_people"],5,"capacity-2 ambulances must not double count")
+        statuses=[e.get("status") for e in sim.events if e.get("incident_id")==incident["id"]]
+        for expected in ("accepted","launched","resource_request","ground_arrived","handed_over","completed"):
+            self.assertIn(expected,statuses)
+        if incident["first_on_scene"]=="drone":
+            self.assertIn("on_scene",statuses);self.assertIn("briefing",statuses)
+            # 5 people exceed one 2-seat ambulance: the briefing raises a follow-up request.
+            self.assertTrue(any(q["stage"]=="assessment" for q in incident["resource_requests"]))
+        self.assertTrue(all(q["status"]=="fulfilled" for q in incident["resource_requests"] if q["stage"]=="report"))
+        metrics=sim.snapshot()["metrics"]["agency"]
+        self.assertGreaterEqual(metrics["resource_requests_raised"],metrics["resource_requests_fulfilled"])
+        self.assertIsNotNone(metrics["median_time_to_briefing_s"])
+
+    def test_random_issue_uses_agency_path(self):
+        sim=OperationsSimulation()
+        result=sim.command("random_incident",{"category":"medical"})
+        self.assertTrue(result["ok"]);self.assertTrue(result["accepted"])
+        incident=sim._find_incident(result["incident_id"])
+        self.assertEqual(incident["source"],"orchestrator-sim")
+        self.assertTrue(incident["request_id"].startswith("sim-"))
 
 
 if __name__=="__main__":unittest.main()

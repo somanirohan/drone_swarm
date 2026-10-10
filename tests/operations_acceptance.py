@@ -93,9 +93,10 @@ def percentile(samples, ratio):
 def profile(world, fleet, frames, dense=False):
     simulation = OperationsSimulation(world, fleet_size=fleet)
     if dense:
-        # Explicit workload stress fixture: add enough distinct observation
-        # patches to exercise the full fleet, rather than benchmarking reserves.
-        simulation._coverage.update({(x,y):None for x in range(-450,451,90) for y in range(-450,451,90)})
+        # Explicit workload stress fixture: every aircraft fully charged so the
+        # whole fleet flies zone searches, rather than benchmarking reserves.
+        for drone in simulation.drones:
+            drone["energy_wh"]=drone["capacity_wh"];drone["battery"]=1.0
         simulation._allocate()
     steps, snapshots, totals = [], [], []
     sizes = []

@@ -4,7 +4,287 @@
 
 The simulator runs on the host computer. A client receives drone positions, energy, routes, incident briefings, ground-resource assignments, evacuation progress and exercise events. Authorized operators can change the exercise. These messages do not command physical aircraft or dispatch real agencies. **DisruptionOps has not been modified or connected.** Start with a read-only connection, then implement the integration boundary deliberately.
 
+**Start with section A below** (new fields, new commands, dispatch detection).
+
 Related files: [implemented cases](HANDLED-CASES.md), [short protocol reference](websocket-protocol.md), [future DisruptionOps adapter](disruptionops-integration.md), [validation](validation.md), [JavaScript client](../../examples/operations-websocket-client.mjs), [Python client](../../examples/operations_ws_client.py).
+
+## A. Update: new fields, new commands, and how to see an ambulance being fired (read this first)
+
+Schema stays `2`; everything below is additive, so an old client keeps working. The protocol string is still `disruptionops.swarm.v2`.
+
+### A.1 Who can do what
+
+| Link you hold | Receive snapshots and events | Send commands |
+|---|---|---|
+| Public `wss://<tunnel>/ops/ws` with no token (the usual shared link) | yes | **no. View-only links cannot send commands.** Every command is answered `ok:false, "Operator authorization required"`, and the browser UI hides its controls. |
+| `?token=<operator token>` (loopback only, never shared) | yes | `scenario`, `fleet`, `detect`, `random_incident`, `random_scenario`, `reset`, `pause`, `resume`, `speed`, `fault`, `release_resource`, `ack_handoff` |
+| `?token=<OPS_INTEGRATION_TOKEN>` (set by the host before start) | yes | only `external_resource_update` and `agency_request` |
+
+### A.2 New snapshot fields
+
+| Where | Field | Meaning |
+|---|---|---|
+| top level | `signals[]` | pulses from the last 6 simulated seconds: `{id, t, kind, from_type, from_id, to_ids[], position, incident_id, text}`; kinds `sos`, `briefing`, `ack`, `recall`, `dispatch`, `arrival`, `supply_request`, `resource_request`. `id` increases; remember the highest one you handled. |
+| top level | `docks[]` | `{id, name, position, drone_ids, docked, launched}` (dock scenario) |
+| top level | `search_map[]` | 100 m cells: `probability`, `prior`, `last_observed`, `status` |
+| top level | `people[]` | one record per person in need: `incident_id`, `position`, `on`, `status` |
+| top level | `metrics.agency` | `requests_received`, `accepted`, `declined`, `median_time_to_first_drone_s`, `median_time_to_briefing_s`, `resource_requests_raised`, `resource_requests_fulfilled`, `supplies_delivered`, `handoffs`, `drone_first`, `ground_first` |
+| each drone | `zone`, `target`, `behavior`, `activity`, `sensor_radius_m`, `speed_mps`, `dock_id`, `home` | what the aircraft is doing and why |
+| each incident | `first_on_scene` (drone, ground or null), `request_id`, `requested_by`, `resource_requests[]`, `supply_requests[]`, `building_id` | orchestrator-facing state |
+| each resource | `agency`, `agency_id`, `station`, `real_position`, `off_map`, `approach_m`, `approach_until`, `source_catalog_id` | real DisruptionOps unit (migration 029 id such as `PC-AMB-01`) |
+| each event | `status`, `request_id`, `data` | machine-readable orchestrator status |
+
+### A.3 New commands (operator token unless noted)
+
+```json
+{"type":"command","id":"<uuid>","expected_run_id":"<run>","action":"fleet","payload":{"value":20}}
+{"type":"command","id":"<uuid>","expected_run_id":"<run>","action":"detect","payload":{"position":[120,-80],"category":"fire","people":4,"severity":5}}
+{"type":"command","id":"<uuid>","expected_run_id":"<run>","action":"random_incident","payload":{"category":"medical"}}
+```
+
+`fleet` (1-100) re-initialises the current scenario with that fleet size and a new `run_id`. `detect` and `random_incident` file an incident through the same path as an external request and the ack carries the swarm's decision. Real ack from a run (fleet 5, `dock_fire`, seed 42):
+
+```json
+{
+ "type": "ack",
+ "id": "18ca4c78-a76d-4b97-bff6-8468543016c9",
+ "ok": true,
+ "result": {
+  "ok": true,
+  "action": "random_incident",
+  "run_id": "c196b269-1e2d-4fcc-a3d2-1ac10dc35806",
+  "revision": 1757,
+  "request_id": "sim-c196b269-3",
+  "accepted": true,
+  "reason": "accepted; aircraft queued",
+  "incident_id": "I005",
+  "merged": false,
+  "eta_s": null,
+  "assigned_drones": [],
+  "plan": [
+   "queued: next aircraft launches when one of 3 airborne is back at its dock",
+   "drop first_aid, medical if a stocked aircraft is available",
+   "request 1x ambulance from orchestrator",
+   "hand the scene over to the first ground crew, then return to dock"
+  ],
+  "position": [
+   278.13,
+   219.12,
+   0
+  ],
+  "source": "orchestrator-sim",
+  "category": "medical"
+ },
+ "incident_id": "I005"
+}
+```
+
+Integration token, `agency_request` (the swarm decides; a repeated `request_id` returns the stored decision with `"duplicate": true` and creates nothing). Real ack, request sent twice (second ack differs only by `"duplicate": true` and `revision`):
+
+```json
+{"type":"command","id":"dops-1","expected_run_id":"<run>","action":"agency_request",
+ "payload":{"request_id":"dops-req-7","kind":"sos","position":[190,-128],"category":"trapped","people":3,
+            "needs":["rescue"],"priority":5,"requested_by":"disruptionops:incident-uuid"}}
+
+{"ok":true,"action":"agency_request","request_id":"dops-req-7","accepted":true,"reason":"accepted; aircraft queued",
+ "incident_id":"I007","merged":false,"eta_s":null,"assigned_drones":[],
+ "plan":["queued: next aircraft launches when one of 3 airborne is back at its dock","request 1x rescue from orchestrator","hand the scene over to the first ground crew, then return to dock"],
+ "source":"orchestrator"}
+```
+
+A decline is `accepted:false` with a `reason` such as "outside the swarm's operating area", "inside a no-fly zone; aerial response not permitted", "swarm at capacity (12 open incidents)", "no energy-feasible aircraft route to that position" or "launch cap of 3 airborne aircraft reached; retry later" (non-SOS kinds only).
+
+### A.4 When an EMS ambulance (or fire engine, rescue team) is fired
+
+"Fired" means the engine assigned an available ground unit to an incident. Four things happen in the same simulated second. A friend's client can use any one; the first is the most reliable.
+
+1. **Event** with `kind: "ground_dispatch"` in `state.events` (and on `GET /ops/events`). The message begins with the unit id. There is no separate unit field, so take the first word of `message` (or use the signal in step 3).
+2. **Resource** entry in `state.resources` with that id changes to `state: "enroute"` (an ambulance already loading may show `evacuating`), gets `incident_id`, `eta` (seconds) and a `route` (list of `[east, north, up]` metres). If the unit's station is outside the map, `off_map: true`, `approach_m` and `approach_until` explain why `position` sits on the map edge and the ETA is long.
+3. **Signals**: a `resource_request` signal from the incident to `"orchestrator"` (the swarm asked for the unit) and a `dispatch` signal from the unit (`from_type: "resource"`, `from_id: "PC-AMB-01"`, `to_ids: ["control"]`).
+4. **Incident** gains the unit in `resource_ids`; the matching `resource_requests[]` item turns to `status: "fulfilled"`, `fulfilled_by: ["PC-AMB-01"]`. Event `status` values `resource_request` then `resource_assigned` (`data.unit_id`) carry the same fact machine-readably.
+
+Later events: `ground_arrived` (`data.first`: `ground` or `drone`), `handoff` when the crew acknowledges the briefing, `drone_recall` or `drone_retask` if a drone was still flying, `handed_over`, `completed`.
+
+**Detection recipe** (ambulance, fire engine, rescue team, boat):
+
+```python
+for e in state['events']:
+    if e['kind'] == 'ground_dispatch' and e['id'] not in seen:
+        seen.add(e['id'])
+        unit_id = e['message'].split(' ')[0]            # e.g. PC-AMB-01
+        unit = next(r for r in state['resources'] if r['id'] == unit_id)
+        # "ambulance PC-AMB-01 of 108 EMS dispatched to incident I005"
+        print(unit['kind'], unit['id'], 'of', unit['agency'], 'dispatched to incident', e['incident_id'])
+        route = unit['route']          # [[east, north, up], ...] metres: plot as a polyline
+        eta_s = unit['eta']
+```
+
+Plot: convert metres with the anchor `[18.6526632, 73.7624378]`: `lon = 73.7624378 + east / (111320 * cos(lat0))`, `lat = 18.6526632 + north / 111320`. For an `off_map` unit also draw a dashed line from `real_position` to `position` (the approach leg).
+
+**Real excerpt** (run `c196b269...`, fleet 5, `dock_fire`, one `random_incident` of category medical; the route is shortened to two points and a count; other fields unchanged):
+
+The event:
+
+```json
+{
+ "id": "c196b269-1e2d-4fcc-a3d2-1ac10dc35806:53",
+ "run_id": "c196b269-1e2d-4fcc-a3d2-1ac10dc35806",
+ "time": 106.11,
+ "kind": "ground_dispatch",
+ "message": "PC-AMB-01 (ambulance) dispatched concurrently via a valid road route, ETA 785 s as nearest available ambulance.",
+ "incident_id": "I005"
+}
+```
+
+The resource:
+
+```json
+{
+ "id": "PC-AMB-01",
+ "kind": "ambulance",
+ "catalog_kind": "ambulance",
+ "name": "108 Ambulance 01 (YCM Hospital)",
+ "agency": "108 EMS",
+ "agency_id": "health",
+ "station": "YCM Hospital",
+ "state": "enroute",
+ "position": [
+  579.17,
+  -292.63,
+  0
+ ],
+ "real_position": [
+  6201.1,
+  -3387.1,
+  0
+ ],
+ "off_map": true,
+ "approach_m": 6417.3,
+ "approach_until": 819.1423333333337,
+ "incident_id": "I005",
+ "route": [
+  [
+   579.17,
+   -292.63,
+   0
+  ],
+  [
+   579.17,
+   -292.63,
+   0
+  ],
+  "... 42 points"
+ ],
+ "eta": 785.3165843321626,
+ "capacity": 4,
+ "free_at": null,
+ "arrived_at": null,
+ "acknowledged": false,
+ "transport": "road",
+ "load": 0,
+ "source_catalog_id": "PC-AMB-01",
+ "speed_mps": 0.0
+}
+```
+
+The two signals (`resource_request` then `dispatch`):
+
+```json
+{
+ "id": 32,
+ "t": 106.11,
+ "kind": "resource_request",
+ "from_type": "incident",
+ "from_id": "I005",
+ "to_ids": [
+  "orchestrator"
+ ],
+ "position": [
+  278.13,
+  219.12,
+  0.0
+ ],
+ "incident_id": "I005",
+ "text": "Request 1x ambulance: initial report: medical, 1 people."
+}
+```
+
+```json
+{
+ "id": 33,
+ "t": 106.11,
+ "kind": "dispatch",
+ "from_type": "resource",
+ "from_id": "PC-AMB-01",
+ "to_ids": [
+  "control"
+ ],
+ "position": [
+  579.17,
+  -292.63,
+  0.0
+ ],
+ "incident_id": "I005",
+ "text": "108 Ambulance 01 (YCM Hospital) responding to I005, ETA 785 s."
+}
+```
+
+The incident (selected fields):
+
+```json
+{
+ "id": "I005",
+ "category": "medical",
+ "title": "Casualty needs first aid and transport",
+ "position": [
+  278.13,
+  219.12,
+  0
+ ],
+ "severity": 4,
+ "people": 1,
+ "request_id": "sim-c196b269-3",
+ "requested_by": "random-issue harness",
+ "first_on_scene": null,
+ "resource_requests": [
+  {
+   "request_id": "I005-RR1",
+   "incident_id": "I005",
+   "needed_kind": "ambulance",
+   "qty": 1,
+   "urgency": "high",
+   "position": [
+    278.13,
+    219.12,
+    0.0
+   ],
+   "rationale": "initial report: medical, 1 people",
+   "stage": "report",
+   "briefing_revision": null,
+   "raised_at": 106.11,
+   "status": "fulfilled",
+   "fulfilled_by": [
+    "PC-AMB-01"
+   ],
+   "fulfilled_at": 106.11
+  }
+ ],
+ "resource_ids": [
+  "PC-AMB-01"
+ ],
+ "required_kinds": [
+  "ambulance"
+ ]
+}
+```
+
+Notes: units are the real PCMC fleet of DisruptionOps migration 029 (agency string comes from the catalog, "108 EMS" for `PC-AMB-01`). `eta` 785 s is mostly the approach from YCM Hospital, 6.4 km outside the map. Everything is simulated; no real ambulance was alerted.
+
+### A.5 Clients
+
+`examples/operations_ws_client.py --watch 40` and `node examples/operations-websocket-client.mjs <base-url> <seconds> [category]` print `DISPATCH`, `STATUS` and `SIGNAL` lines and the agency metrics. With an operator token in `OPS_FRIEND_TOKEN` the Node client also fires one `random_incident`; the Python client does so with `--action random_incident`. With no token both stay read-only.
+
+---
 
 ## 1. Start and verify the service
 
@@ -225,9 +505,7 @@ The ID must be a nonempty string of at most 128 characters. `payload` must be an
 | `release_resource` | `{"resource_id":"R02"}` | Frees an uncommitted simulated resource; rejects one serving an incident |
 | `ack_handoff` | `{"incident_id":"I001","resource_id":"R01"}` | Must use **actual IDs** from the snapshot; requires matching physically arrived responder |
 
-There are nine action names; the repeated table rows enumerate their options. IDs above are illustrative. Select real IDs and states from current telemetry. There is no remote fleet-size command; restart with `--fleet` to change it.
-
-The engine contains an internal `detect` helper, but it is **not whitelisted on `/ops/ws`**. Do not send a detection, `goto`, arm, takeoff, cancel, camera stream, link-restoration or individual waypoint command: these are not public actions. A new live incident ingestion contract would need implementation.
+Beyond the rows above, section A documents `fleet`, `detect`, `random_incident` and (integration token only) `agency_request`. `dock_fire` is a fourth scenario id. IDs in the table are illustrative; select real IDs and states from current telemetry. There is no `goto`, arm, takeoff, cancel, camera stream, link-restoration or individual waypoint command, and none will be added: the swarm decides its own flight.
 
 ## 6. Timing, safety and recovery semantics
 

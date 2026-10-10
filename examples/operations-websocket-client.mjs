@@ -56,3 +56,35 @@ export function connectSwarm({baseUrl, token='', onState=()=>{}, onAck=()=>{}, o
     close(){stopped=true;clearInterval(staleTimer);clearTimeout(retryTimer);rejectPending('Client closed.');socket?.close(1000);}
   };
 }
+
+/** Print only what is new: ground dispatches, orchestrator status events and key signals. */
+export function describeNew(state, printed, log=console.log) {
+  const byId=new Map((state.resources||[]).map(r=>[r.id,r]));
+  for(const e of state.events||[]){
+    const key='e'+e.id;if(printed.has(key))continue;printed.add(key);
+    if(e.kind==='ground_dispatch'){
+      const id=e.message.split(' ')[0],r=byId.get(id)||{};
+      log(`DISPATCH t=${e.time}s ${id} kind=${r.kind} agency=${r.agency} -> ${e.incident_id} state=${r.state} eta=${r.eta} route_points=${(r.route||[]).length}`);
+    } else if(e.status) log(`STATUS   t=${e.time}s ${e.status} incident=${e.incident_id} request=${e.request_id} data=${JSON.stringify(e.data)}`);
+  }
+  for(const s of state.signals||[]){
+    const key='s'+s.id;if(printed.has(key))continue;printed.add(key);
+    if(['sos','dispatch','resource_request','supply_request','recall','arrival'].includes(s.kind))
+      log(`SIGNAL   ${s.kind} ${s.from_type}:${s.from_id} -> ${JSON.stringify(s.to_ids)} incident=${s.incident_id} ${s.text||''}`);
+  }
+  return state.metrics?.agency;
+}
+
+// CLI: node examples/operations-websocket-client.mjs http://localhost:8821 [watch-seconds] [category]
+// With OPS_FRIEND_TOKEN set (operator token) it fires one random_incident after the first frame.
+if (process.argv[1]?.endsWith('operations-websocket-client.mjs')) {
+  const [baseUrl='http://localhost:8787',watch='20',category]=process.argv.slice(2);
+  const token=process.env.OPS_FRIEND_TOKEN||'',printed=new Set();let fired=false,agency=null;
+  const client=connectSwarm({baseUrl,token,onStatus:()=>{},
+    onState:state=>{
+      agency=describeNew(state,printed);
+      if(token&&!fired){fired=true;
+        client.send(client.makeCommand('random_incident',category?{category}:{})).then(a=>console.log('ACK',JSON.stringify(a.result))).catch(e=>console.log('REJECTED',e.message));}
+    }});
+  setTimeout(()=>{console.log('AGENCY METRICS',JSON.stringify(agency));client.close();process.exit(0);},Number(watch)*1000);
+}

@@ -29,8 +29,8 @@ from websockets.http11 import Response
 ROOT = Path(__file__).resolve().parent
 PROTOCOL = 'disruptionops.swarm.v2'
 COMMANDS = {'random_scenario', 'scenario', 'pause', 'resume', 'speed', 'reset',
-            'fault', 'release_resource', 'ack_handoff'}
-INTEGRATION_COMMANDS = {'external_resource_update'}
+            'fault', 'release_resource', 'ack_handoff', 'fleet', 'detect', 'random_incident'}
+INTEGRATION_COMMANDS = {'external_resource_update', 'agency_request'}
 
 
 class EventJournal:
@@ -218,6 +218,8 @@ class OperationsServer:
                 ack['error'] = str(result.get('error', 'Command rejected'))
             else:
                 ack.update(ok=True, result=result)
+                if isinstance(result, dict) and result.get('incident_id'):
+                    ack['incident_id'] = result['incident_id']
         except (ValueError, KeyError, TypeError, OverflowError) as exc:
             ack['error'] = str(exc)
         self.acks[identity] = fingerprint, ack

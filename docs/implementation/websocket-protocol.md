@@ -8,7 +8,7 @@ Protocol: `disruptionops.swarm.v2`; snapshot schema: `2`. Default address: `ws:/
 
 `GET /ops/session` returns an exercise operator token only to a direct loopback request addressed to localhost/127.0.0.1/::1, without forwarding headers. Public tunnel requests return a view-only session. Pass an operator token as `?token=...` during WebSocket upgrade. Tokens are private and must not enter committed files, screenshots or shared logs. The application removes an explicitly supplied `#control=...` fragment and keeps it in session storage.
 
-The server rejects cross-origin browser WebSocket handshakes. Viewers may receive snapshots and event replay but cannot change the exercise. A separate `OPS_INTEGRATION_TOKEN` can authorize only `external_resource_update`; it cannot invoke operator actions. This integration channel is reserved and is not connected to DisruptionOps in the running demonstration. Ground updates, when enabled later, contain handoffs and briefing revisions together; there is no separate `external_handoff` action.
+The server rejects cross-origin browser WebSocket handshakes. Viewers may receive snapshots and event replay but cannot change the exercise. A separate `OPS_INTEGRATION_TOKEN` can authorize only `external_resource_update` and `agency_request`; it cannot invoke operator actions. This integration channel is reserved and is not connected to DisruptionOps in the running demonstration. Ground updates, when enabled later, contain handoffs and briefing revisions together; there is no separate `external_handoff` action.
 
 ## Server → client
 
@@ -59,7 +59,10 @@ Rejected commands return `ok:false` and an `error` string. Invalid JSON may retu
 
 | Action | Payload |
 |---|---|
-| `scenario` | `id`: rooftop_flood / medical_supply / blocked_bridge; optional integer `seed` |
+| `scenario` | `id`: rooftop_flood / medical_supply / blocked_bridge / dock_fire; optional integer `seed` |
+| `fleet` | integer `value` 1–100 (UI offers 5/10/20/25/40/50); re-initialises the current scenario and seed with that fleet size (new `run_id`) |
+| `detect` | `position` `[x,y]` or `[x,y,z]` (map click), `category` medical / flood / fire / trapped / blocked_route, optional `people`, `severity` 1–5, `needs` ⊂ first_aid/medical/food/assessment/rescue, `title`. Snapped (roof of the clicked building for fire/trapped/flood, nearest open road point for medical/blocked_route) and sent through the same `agency_request` path (`source:"orchestrator-sim"`). Ack carries `incident_id`; a declined request is `ok:false` with the reason. |
+| `random_incident` | optional `category` (as above). Picks a valid location reproducibly from (seed, per-run counter): a real building roof for fire/trapped, a roof inside the flood corridor for flood (boat case), a dry reachable road point for medical/blocked_route; never in the no-fly zone. Same agency path; ack carries `incident_id` and `result.category`. At most 12 open incidents. |
 | `random_scenario` | `{}` |
 | `reset` | `{}`; optional integer seed |
 | `pause`, `resume` | `{}` |
@@ -69,6 +72,40 @@ Rejected commands return `ok:false` and an `error` string. Invalid JSON may retu
 | `ack_handoff` | existing `incident_id`, matching physically arrived `resource_id` |
 
 Use a fresh ID for each intended action and include the current `expected_run_id`. The server caches 2,000 acknowledgments per process, with operator/integration identity separation. Retrying the exact command returns the original acknowledgment across reconnects. Reusing an ID with different action/payload/run expectation is rejected. After an ambiguous timeout, reuse the same ID if retrying within the same process; after a restart, read the new state before issuing any action. The browser does not automatically retry timed-out mutations.
+
+## Snapshot additions (schema 2, additive)
+
+Per drone, in addition to the existing fields:
+
+| Field | Meaning |
+|---|---|
+| `sensor_radius_m` | ground footprint radius = altitude × tan 30° when above 3 m, else 0 |
+| `activity` | docked / launching / transit / scanning / assessing / delivering / returning / charging / holding / failed |
+| `behavior` | behaviour-tree node: search / confirm / assess / relay / return / charge / idle / hold / failed |
+| `speed_mps` | measured speed over the last sub-step (0 when parked) |
+| `zone` | search-cell ids owned by this aircraft (Voronoi partition, recomputed only when an aircraft joins/fails; empty for docked fleets) |
+| `target` | `{type: cell|incident|dock|base, id, position}` or `null` |
+| `search_target`, `dock_id`, `home`, `retasked` | current sweep cell; dock and own landing pad (dock scenarios); `"supply"` when a ground-first crew let it finish only a drop |
+
+Top level:
+
+- `signals`: communication pulses from the last 6 simulated seconds: `{id:int, t, kind, from_type: drone|resource|incident, from_id, to_ids[], position[x,y,z], incident_id, text}`. Kinds: `sos`, `dispatch`, `arrival`, `briefing`, `ack`, `recall`, `supply_request`, and **`resource_request`** (swarm → orchestrator, `to_ids:["orchestrator"]`). Recipients may include the pseudo-ids `control` and `orchestrator`.
+- `docks`: `{id, name, position, drone_ids, docked, launched}`; `metrics.launched`, `metrics.dispatch_cap` (3) in dock scenarios, else `null`.
+- `search_map`: `{id, center[x,y,0], size_m:100, probability, prior, last_observed, status: unsearched|searched|cleared|blocked}`. Prior is higher near water, dense buildings and reported incidents; it drops ×0.35 when a sensor footprint covers the cell and slowly relaxes back. `coverage` is kept for older clients.
+- `people`: one entry per person in need `{id, incident_id, position, on: roof|ground|boat_site, building_id, status, need}`; status ∈ waiting / assessed / supplied / being_rescued / evacuated / hospitalised. Positions are deterministic from the seed (inside the roof footprint, beside the road, or at the boat pickup).
+- Incidents add `building_id`, `first_on_scene` (drone|ground|null), `drone_on_scene_at`, `briefed_at`, `request_id`, `requested_by`, `resource_requests[]`, `supply_requests[]`, `hospitalised_people`.
+- Resources in `dock_fire` are the real PCMC units from `assets/operations/agency-catalog.json` (DisruptionOps migration 029): `id` like `PC-FIRE-01`, `name`, `agency` (operator), `station`, `real_position`, `off_map`, `approach_m`, `approach_until`. Off-map units wait at the nearest map-edge road node and pay a one-off approach delay (real distance / ground speed).
+- `metrics.agency`: `requests_received`, `accepted`, `declined`, `median_time_to_first_drone_s`, `median_time_to_briefing_s`, `resource_requests_raised`, `resource_requests_fulfilled`, `supplies_delivered`, `handoffs`, `drone_first`, `ground_first`.
+
+## The swarm as an agency (orchestrator contract)
+
+DisruptionOps is the orchestrator; the swarm is an agency that decides for itself.
+
+**Inbound** (integration token only): `agency_request` `{request_id (idempotent, 1–128 chars), kind: sos|assess|supply|overwatch, position [x,y(,z)], category, people, needs, priority 1–5, requested_by, sim_run_id?}`. The ack `result` is `{request_id, accepted, reason, incident_id, merged, eta_s, assigned_drones[], plan[], position, source}`; a repeated `request_id` returns the stored decision with `duplicate:true` and creates nothing. Declines: outside the operating area, inside a no-fly zone, 12 open incidents, no energy-feasible aircraft, or (non-SOS kinds) the dock launch cap. An SOS under the cap is accepted and queued.
+
+**Outbound**: after accepting (from the report) and after the first aerial assessment (e.g. more people than seats on the way), the swarm raises `resource_request` `{request_id, incident_id, needed_kind, qty, urgency, position, rationale, briefing_revision}` as an event (`status:"resource_request"`, details in `data`) and a signal. Standalone, the local ground units answer as a mock orchestrator (`resource_assigned` events); with `external_ground` they are answered by `external_resource_update`.
+
+**Status back**: every event with an orchestrator meaning carries `status` (and `request_id`, `data` where useful): `accepted`, `declined`, `launched`, `on_scene`, `briefing` (`data.revision`), `resource_request`, `resource_assigned`, `supply_delivered`, `ground_arrived` (`data.first`), `retasked`, `recalled`, `handed_over`, `completed`. They are journalled on `/ops/events` and sent in snapshots. `random_incident` and `detect` use exactly this path (`source:"orchestrator-sim"`).
 
 ## Transport limits and recovery
 

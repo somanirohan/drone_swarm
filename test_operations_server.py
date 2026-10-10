@@ -226,6 +226,32 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.server.clients.pop(marker,None)
 
+    async def test_fleet_detect_and_random_incident_commands(self):
+        async with connect(self.ws_url+'?token=test-only-operator') as ws:
+            await ws.send(self.envelope('fleet-5','fleet',{'value':5}))
+            self.assertTrue((await self.receive(ws,'ack','fleet-5'))['ok'])
+            self.assertEqual(len(self.engine.drones),5)
+            await ws.send(self.envelope('fleet-bad','fleet',{'value':101}))
+            self.assertFalse((await self.receive(ws,'ack','fleet-bad'))['ok'])
+            await ws.send(self.envelope('sos','detect',{'position':[-150,-160],'category':'trapped','people':2}))
+            ack=await self.receive(ws,'ack','sos')
+            self.assertTrue(ack['ok']);self.assertTrue(ack['incident_id'])
+            await ws.send(self.envelope('rnd','random_incident',{'category':'medical'}))
+            ack=await self.receive(ws,'ack','rnd')
+            self.assertTrue(ack['ok']);self.assertEqual(ack['result']['category'],'medical')
+            frame=await self.receive(ws,'snapshot')
+            self.assertIn('signals',frame['state']);self.assertIn('people',frame['state']);self.assertIn('search_map',frame['state'])
+
+    async def test_agency_request_requires_integration_token(self):
+        async with connect(self.ws_url+'?token=test-only-operator') as ws:
+            await ws.send(self.envelope('orch','agency_request',{'request_id':'R-1','kind':'sos','position':[-100,-200]}))
+            self.assertFalse((await self.receive(ws,'ack','orch'))['ok'])
+        self.server.integration_token='integration-test-token'
+        async with connect(self.ws_url+'?token=integration-test-token') as ws:
+            await ws.send(self.envelope('orch','agency_request',{'request_id':'R-1','kind':'sos','position':[-100,-200],'category':'medical'}))
+            ack=await self.receive(ws,'ack','orch')
+            self.assertTrue(ack['ok']);self.assertTrue(ack['result']['accepted']);self.assertTrue(ack['incident_id'])
+
     async def test_event_http_replay_is_ordered(self):
         await asyncio.sleep(.12)
         status,_,body=await self.http('/ops/events?limit=2')
