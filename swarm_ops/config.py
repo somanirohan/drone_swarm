@@ -50,6 +50,7 @@ class Settings:
     port: int = 8787
     control_token: str = field(default="", repr=False)
     integration_token: str = field(default="", repr=False)
+    public_demo: bool = False
     allowed_origins: tuple[str, ...] = ()
     fleet: int = 20
     world: str = "pune-district"
@@ -77,6 +78,7 @@ class Settings:
             port=_int(env, "PORT", 8787, 0, 65535),
             control_token=env.get("OPS_CONTROL_TOKEN", ""),
             integration_token=env.get("OPS_INTEGRATION_TOKEN", ""),
+            public_demo=env.get("OPS_PUBLIC_DEMO", "").strip().lower() in ("true", "1", "yes"),
             allowed_origins=origins,
             fleet=_int(env, "FLEET", 20, 1, 60),
             world=world,
@@ -112,6 +114,7 @@ class Settings:
             "host": self.host, "port": self.port, "world": self.world, "fleet": self.fleet, "seed": self.seed,
             "scenario": self.scenario, "allowed_origins": list(self.allowed_origins),
             "control_token_set": bool(self.control_token), "integration_token_set": bool(self.integration_token),
+            "public_demo": self.public_demo,
             "disruptionops_url": self.disruptionops_url or None, "disruptionops_token_set": bool(self.disruptionops_token),
             "live_data": self.live_data, "log_level": self.log_level,
         }

@@ -32,6 +32,7 @@ class DeployedServer(OperationsServer):
 
     def __init__(self, engine, settings: Settings, reference: dict, **kwargs):
         super().__init__(engine, **kwargs)
+        self.public_demo = settings.public_demo
         self.settings = settings
         self.reference = reference
         if settings.integration_token:

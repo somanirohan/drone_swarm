@@ -62,8 +62,9 @@ class EventJournal:
 
 
 class OperationsServer:
-    def __init__(self, engine, *, control_token=None, journal_path=None, host='127.0.0.1', port=8787, frame_hz=10):
+    def __init__(self, engine, *, control_token=None, journal_path=None, host='127.0.0.1', port=8787, frame_hz=10, public_demo=False):
         self.engine = engine
+        self.public_demo = public_demo
         self.control_token = control_token or secrets.token_urlsafe(32)
         self.integration_token = os.environ.get('OPS_INTEGRATION_TOKEN', '')
         self.host, self.port = host, port
@@ -83,6 +84,8 @@ class OperationsServer:
         self.telemetry = Telemetry(runs_dir, secrets=(self.control_token, self.integration_token))
 
     def _role(self, request, params=None):
+        if self.public_demo:
+            return 'operator'
         token = request.headers.get('Authorization', '')[7:] if request.headers.get('Authorization', '').startswith('Bearer ') else (params or {}).get('token', [''])[0]
         if token and secrets.compare_digest(token.encode(), self.control_token.encode()):
             return 'operator'
@@ -135,6 +138,8 @@ class OperationsServer:
         if path == '/health':
             return self._json(HTTPStatus.OK, {'ok': True, 'protocol': PROTOCOL, 'simulation_only': True, 'clients': len(self.clients), 'integration': bool(self.bridge)})
         if path == '/ops/session':
+            if self.public_demo:
+                return self._json(HTTPStatus.OK, {'can_control': True, 'public_demo': True, 'simulation_only': True})
             if not self._local_operator(connection, request):
                 return self._json(HTTPStatus.OK, {'can_control': False, 'simulation_only': True})
             return self._json(HTTPStatus.OK, {'control_token': self.control_token, 'can_control': True, 'simulation_only': True})
@@ -200,8 +205,8 @@ class OperationsServer:
     async def websocket(self, ws):
         params = parse_qs(urlsplit(ws.request.path).query)
         token = params.get('token', [''])[0]
-        can_control = bool(token and secrets.compare_digest(token.encode(), self.control_token.encode()))
-        can_integrate = bool(self.integration_token and token and secrets.compare_digest(token.encode(), self.integration_token.encode()))
+        can_control = self.public_demo or bool(token and secrets.compare_digest(token.encode(), self.control_token.encode()))
+        can_integrate = self.public_demo or bool(self.integration_token and token and secrets.compare_digest(token.encode(), self.integration_token.encode()))
         role = 'operator' if can_control else 'integration' if can_integrate else 'view'
         self.telemetry.connection('ws.connect', role, ws.remote_address)
         state = self.engine.snapshot()

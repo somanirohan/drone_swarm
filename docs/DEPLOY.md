@@ -80,6 +80,15 @@ docker compose --profile command-center up   # also runs the DisruptionOps stand
 The event journal lives in `/app/.cache` (a named volume in compose). Not built in the authoring environment (Docker was not installed).
 
 ## Render
+For an open simulation where anyone can use dashboard controls and all WebSocket commands,
+set `OPS_PUBLIC_DEMO=true` in the Render service Environment tab and deploy the change.
+Open the normal service URL; no control link or tokens are needed. Connect API clients to
+`wss://<service>.onrender.com/ops/ws` without a token. `/ops/session` reports
+`can_control: true, public_demo: true` without exposing either secret. This mode also opens
+run datasets and telemetry to readers. Command validation, rate limits and browser origin
+checks still apply. Add external browser origins to `ALLOWED_ORIGINS` as needed.
+Set the flag to `false` and deploy again to restore token permissions.
+
 Push the repository, then Render -> New -> Blueprint -> pick the repo (`render.yaml`). It generates both tokens; read them in the service Environment tab. Set `ALLOWED_ORIGINS` if a browser UI on another origin connects, and `DISRUPTIONOPS_*` if used. Health check: `/health`. Free/starter instances sleep or restart: the simulation resets and the journal is lost unless a disk is attached at `/app/.cache`.
 
 Operators on a public URL open `https://<service>.onrender.com/#control=<OPS_CONTROL_TOKEN>`. Public viewers are read-only.
