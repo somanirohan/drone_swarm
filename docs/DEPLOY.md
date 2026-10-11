@@ -80,6 +80,13 @@ docker compose --profile command-center up   # also runs the DisruptionOps stand
 The event journal lives in `/app/.cache` (a named volume in compose). Not built in the authoring environment (Docker was not installed).
 
 ## Render
+To match the detailed local 3D scene, use `WORLD=pune-district` and leave `SCENARIO`
+unset (or set `SCENARIO=rooftop_flood`). The Blueprint defaults to this world.
+`WORLD=pcmc-region` intentionally loads the much larger 14 km district map, whose
+initial overview hides close-up building detail. Existing Render services must change
+their Environment values and redeploy; changing the Blueprint does not override a
+manually configured service. Keep `OPS_PUBLIC_DEMO=true` for public read/write controls.
+
 For an open simulation where anyone can use dashboard controls and all WebSocket commands,
 set `OPS_PUBLIC_DEMO=true` in the Render service Environment tab and deploy the change.
 Open the normal service URL; no control link or tokens are needed. Connect API clients to

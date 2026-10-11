@@ -8,7 +8,7 @@ services:
     autoDeploy: true
     envVars:
       - {key: HOST, value: 0.0.0.0}
-      - {key: WORLD, value: pcmc-region}
+      - {key: WORLD, value: pune-district}
       - {key: FLEET, value: "20"}
       - {key: LOG_LEVEL, value: INFO}
       - {key: OPS_CONTROL_TOKEN, generateValue: true}
