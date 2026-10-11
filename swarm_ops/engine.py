@@ -43,6 +43,7 @@ import uuid
 from pathlib import Path
 
 from swarm_ops.agents import DecisionLog, DroneAgent, MessageBus, SwarmCoordinator
+from swarm_ops.decentral import COORDINATION_MODES, DEFAULTS as COORDINATION_DEFAULTS, DecentralizedLayer
 from swarm_ops.nodes import NodeRuntime, node_for_kind
 from swarm_ops.planning import FlightPlanner
 from swarm_ops.traffic import Traffic
@@ -256,7 +257,10 @@ class OperationsSimulation:
     _WORLD_CACHES = ("_buildings_cache", "_road_base", "_search_prior_cache", "_person_positions",
                      "_connector_cache", "_ground_cache", "_planner", "_edge_index", "_building_grid")
 
-    def __init__(self, world=None, seed=42, fleet_size=20, scenario="rooftop_flood"):
+    def __init__(self, world=None, seed=42, fleet_size=20, scenario="rooftop_flood", coordination="central"):
+        if coordination not in COORDINATION_MODES:raise ValueError("coordination must be central, decentralized or orchestrated")
+        # Swarm coordination mode (command set_coordination): kept across scenario resets.
+        self._coordination_config = {**COORDINATION_DEFAULTS, "mode": coordination}
         self._home_world = copy.deepcopy(world or _default_world())
         self._home_world_id = str(self._home_world.get("id") or (DEFAULT_WORLD_ID if world is not None else "default-grid"))
         self.world = self._home_world
@@ -337,6 +341,10 @@ class OperationsSimulation:
                 if staging:self.resources[-1]["position"]=[*staging[1],self.flood["level"]]
         self.agents = {d["id"]: DroneAgent(d, self.bus, self.decisions) for d in self.drones}
         self.coordinator = SwarmCoordinator(self, self.bus, self.decisions)
+        # central = coordinator auction (default); decentralized = drones self-organise (CBBA over a simulated
+        # mesh radio); orchestrated = DisruptionOps assigns drones/roles. Per incident: incident["coordination_mode"].
+        self.coordination = {"mode": self._coordination_config["mode"]}
+        self.decentral = DecentralizedLayer(self, self._coordination_config)
         self._booting = True
         self.bus.listeners.append(self._on_bus_message)
         if getattr(self, "nodes", None) is None:
@@ -1164,12 +1172,58 @@ class OperationsSimulation:
     def _find_incident(self,identifier):
         return next((i for i in self.incidents if i["id"]==identifier),None)
 
+    def _coordination_mode(self,incident):
+        """Effective mode for an incident: orchestrated (DisruptionOps assigns) > per-incident choice > global."""
+        if incident is not None and incident.get("control_mode")=="orchestrated":return "orchestrated"
+        return (incident or {}).get("coordination_mode") or self.coordination["mode"]
+
+    def _set_coordination(self,payload):
+        mode=payload.get("mode")
+        if mode not in COORDINATION_MODES:raise ValueError("mode must be central, decentralized or orchestrated")
+        params={}
+        for key,low,high in (("radio_range_m",50,20000),("packet_loss",0,0.95),("latency_s",0,5),("max_bundle",1,4),("peer_timeout_s",2,120)):
+            value=payload.get(key)
+            if value is None:continue
+            if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not low<=value<=high:raise ValueError(f"{key} must be between {low} and {high}")
+            params[key]=int(value) if key=="max_bundle" else float(value)
+        self._coordination_config.update(params)
+        self.decentral.configure(**params)
+        by=str(payload.get("by") or "command_center")[:40]
+        if payload.get("incident_id") or payload.get("external_id"):
+            incident=self._orch_incident(payload)
+            if mode=="orchestrated":
+                incident["control_mode"]="orchestrated";incident["assigned_by"]=incident.get("assigned_by") or by
+            elif incident.get("control_mode")=="orchestrated":incident.update(control_mode="autonomous",pending_assign=None)
+            incident["coordination_mode"]=mode
+            scope=incident["id"];iid=incident["id"]
+        else:
+            self.coordination["mode"]=mode;self._coordination_config["mode"]=mode
+            scope="global";iid=None
+        what={"decentralized":"drones self-organise by consensus","orchestrated":"DisruptionOps assigns drones and roles"}.get(mode,"swarm coordinator auction")
+        self.decisions.record("swarm","set_coordination",f"{scope}: {mode} ({what})",incident_id=iid)
+        self.bus.post("command_center","swarm","task",f"set_coordination {scope} -> {mode}",iid,None,{"coordination":mode,**params})
+        self._event("coordination",f"Coordination for {scope} set to {mode}.",iid)
+        self._allocate()
+        return {"coordination":{"mode":self.coordination["mode"],"scope":scope,"incident_mode":mode if iid else None,
+                                **{k:self.decentral.config[k] for k in ("radio_range_m","packet_loss","latency_s","max_bundle","peer_timeout_s")}}}
+
     def _allocate(self):
         for incident in sorted(self.incidents,key=lambda i:(-i["severity"],i["created_at"],i["id"])):
             if incident["status"]=="resolved":continue
             incident["wait_reason"]=None
             if incident.get("control_mode")=="orchestrated":
                 self._apply_assignments(incident);continue
+            mode=self._coordination_mode(incident)
+            if mode=="decentralized":
+                # Independent: the command link gives the swarm the mission; the drones derive and allocate the
+                # aerial sub-tasks among themselves (swarm_ops.decentral / cbba). No central award here.
+                if incident["id"] in self.decentral.missions or incident["handed_over"]:continue
+                if self._paused():
+                    incident["wait_reason"]=f"Swarm autonomy paused by the command centre ({self.control['reason'] or 'no reason given'})";continue
+                self.decentral.issue_mission(incident);continue
+            if mode=="orchestrated":
+                if not incident["drone_id"]:incident["wait_reason"]="Dependent mode: waiting for DisruptionOps to assign aircraft"
+                continue
             if incident["handed_over"] or incident["drone_id"] or incident["uncertain_delivery"]:continue
             if self._paused():
                 incident["wait_reason"]=incident["wait_reason"] or f"Swarm autonomy paused by the command centre ({self.control['reason'] or 'no reason given'})"
@@ -1870,6 +1924,8 @@ class OperationsSimulation:
                 self._observe_cells(drone,delta)
                 # Decide and act: the aircraft's own behaviour tree (swarm_ops.agents.DRONE_TREE).
                 self.agents[drone["id"]].tick(self,delta)
+            # Decentralized mode: radio delivery + each aircraft's own consensus step (inactive otherwise).
+            self.decentral.step(delta)
             for resource in self.resources:
                 if self.external_ground:continue
                 if resource["state"]=="busy" and resource["free_at"] is not None and self.t>=resource["free_at"]:
@@ -2250,6 +2306,8 @@ class OperationsSimulation:
                     created=self._agency_request({"request_id":request_id,"kind":kind,"position":([float(v) for v in raw]+[0.0])[:3],"category":category,
                         "people":people,"needs":needs,"priority":severity,"requested_by":str(payload.get("requested_by","orchestrator"))[:80],
                         "evidence":evidence,"title":evidence.get("report_text")},"orchestrator")
+            elif action=="set_coordination":
+                created=self._set_coordination(payload)
             elif action in ORCH_COMMANDS:
                 created=self._orchestrator_command(action,payload)
             elif action=="recall_drone":
@@ -2398,7 +2456,11 @@ class OperationsSimulation:
             # Hover (stand-off) point of the current incident task.
             view["standoff"]=list(drone["route"][-1]) if drone["state"]=="enroute" and drone["route"] else list(drone["position"])
         view["zone"]=list(drone.get("zone",[]))
-        if drone["state"]=="patrolling" and drone.get("search_target"):
+        view["coordination"]=self.decentral.drone_view(drone)
+        if drone.get("dc_working") and drone.get("subtask") and drone["state"] in ("enroute","observing"):
+            task=self.agents[drone["id"]].cbba.tasks.get(drone["subtask"],{})
+            view["target"]={"type":"subtask","id":drone["subtask"],"kind":task.get("kind"),"incident_id":task.get("mission_id"),"position":[*task.get("position",[0,0]),0]}
+        elif drone["state"]=="patrolling" and drone.get("search_target"):
             view["target"]={"type":"cell","id":drone["search_target"],"position":[*self.search_cells[drone["search_target"]]["center"],0]}
         elif drone["task_id"]:
             incident=self._find_incident(drone["task_id"])
@@ -2440,13 +2502,15 @@ class OperationsSimulation:
                            "last_observed":None if c["last"] is None else round(c["last"],2),
                            "status":"blocked" if c["blocked"] else "cleared" if c["p"]<.12 else "searched" if c["last"] is not None else "unsearched"} for c in self.search_cells.values()],
             "people":self._people(),
+            "coordination":{"mode":self.coordination["mode"],"per_incident":{i["id"]:self._coordination_mode(i) for i in self.incidents if i["status"]!="resolved"},**self.decentral.snapshot()},
+            "subtasks":self.decentral.subtasks_view(),"mesh":self.decentral.mesh.snapshot(),
             "decisions":self.decisions.recent(100),"engine":{"decisions":self.decisions.recent(100)},"messages":self.bus.recent(200),"control":dict(self.control),"nodes":self.nodes.snapshot(),
             "traffic":self.traffic.snapshot() if getattr(self,"traffic",None) else [],
             "metrics":{"fleet":len(self.drones),"active_drones":sum(d["active"] for d in self.drones),
                 "open_incidents":len(active),"resolved_incidents":len(self.incidents)-len(active),
                 "available_resources":sum(r["state"]=="available" for r in self.resources),
                 "handoffs":sum(i["handed_over"] for i in self.incidents),"supply_drops":sum(len(i["supplied"]) for i in self.incidents),
-                "faults":self._faults,"launched":self._launched() if self.docks else None,"dispatch_cap":self._cap_total() if self.docks else None,"dispatch_cap_per_incident":self._cap_per_incident() if self.docks else None,"covered_patches":sum(c["last"] is not None for c in self.search_cells.values()),"total_patches":len(self.search_cells),"simulation_only":True,"external_ground":self.external_ground,"agency":self._agency_metrics(),"allocation_mode":"drone bids (swarm node) + orchestrator dispatch to agency nodes over the message bus"}})
+                "faults":self._faults,"launched":self._launched() if self.docks else None,"dispatch_cap":self._cap_total() if self.docks else None,"dispatch_cap_per_incident":self._cap_per_incident() if self.docks else None,"covered_patches":sum(c["last"] is not None for c in self.search_cells.values()),"total_patches":len(self.search_cells),"simulation_only":True,"external_ground":self.external_ground,"agency":self._agency_metrics(),"allocation_mode":{"central":"drone bids, coordinator auction","decentralized":"decentralized CBBA consensus among drones (no central award)","orchestrated":"DisruptionOps assigns drones and roles"}[self.coordination["mode"]]+" + orchestrator dispatch to agency nodes over the message bus"}})
 
 
 # Plug-in scenarios/worlds (swarm_ops/scenarios/*) register themselves on import. Imported last so

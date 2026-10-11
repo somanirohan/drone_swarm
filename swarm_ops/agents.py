@@ -24,7 +24,9 @@ from collections import deque
 from pathlib import Path
 
 MESSAGE_KINDS = ("task", "accept", "decline", "report", "status", "ack", "cancel", "handoff",
-                 "situation_report", "alert", "dispatch", "unit_status")
+                 "situation_report", "alert", "dispatch", "unit_status", "bid", "consensus")
+# 'bid' / 'consensus' are drone-to-drone mesh traffic (decentralized mode). They are high volume and are NOT
+# posted on the bus log: the snapshot aggregates them in ``mesh`` counters (swarm_ops.mesh).
 URGENCIES = ("critical", "high", "normal", "low")
 DRONE_ROLES = ("assess", "supply", "relay", "overwatch", "search")
 SUPPLIES = ("first_aid", "medical", "food", "water")
@@ -150,6 +152,9 @@ def _arrived(agent, sim):
 
 DRONE_TREE = Selector(
     "root",
+    # Decentralized mode: the aircraft works the head of its own CBBA path (swarm_ops.cbba).
+    Sequence("subtask", Condition("has_subtask", lambda a, s: a.drone.get("dc_working") and a.drone["state"] in ("enroute", "observing")),
+             Action("work_subtask", lambda a, s, d: a.work_subtask(s, d))),
     Sequence("deliver_after_handoff", Condition("arrived_retasked", lambda a, s: _arrived(a, s) and a.drone.get("retasked") == "supply"),
              Action("drop_and_return", lambda a, s, d: a.drop_and_return(s))),
     Sequence("assess_on_arrival", Condition("arrived", _arrived), Action("observe", lambda a, s, d: a.start_observing(s))),
@@ -172,6 +177,11 @@ class DroneAgent:
         self.bus = bus
         self.decisions = decisions
         self.memory = {"commitment": None, "briefings": {}, "sweeps": 0, "awards": 0, "declines": 0, "active_node": None}
+        self.cbba = None            # CBBAAgent, created when the drone joins decentralized coordination
+        self.gw_adverts = {}        # neighbour id -> (hops to a gateway it advertised, time heard)
+        self.gw_hops = None         # own estimate (0 = this drone hears the command link itself)
+        self._next_heartbeat = 0.0
+        self._next_scene_look = 0.0
 
     # perception
     def incident(self, sim):
@@ -298,6 +308,267 @@ class DroneAgent:
         else:
             self.decide("return", "search zone swept" if drone["battery"] >= .4 else "battery below search threshold")
             sim._return(drone, "search zone swept")
+
+
+    # ------------------------------------------------------------ decentralized coordination (CBBA)
+    # Everything below uses ONLY this aircraft's own state, what it observes, and the radio messages it
+    # received (swarm_ops.mesh). The engine-side scheduler (swarm_ops.decentral) never assigns work.
+    def enable_cbba(self, max_bundle=2, peer_timeout=10.0):
+        if self.cbba is None:
+            from swarm_ops.cbba import CBBAAgent
+            self.cbba = CBBAAgent(self.id, max_bundle=max_bundle, peer_timeout=peer_timeout)
+        else:
+            self.cbba.max_bundle, self.cbba.peer_timeout = int(max_bundle), float(peer_timeout)
+        return self.cbba
+
+    def can_bid(self):
+        d = self.drone
+        if not d["active"] or not d["link"]:
+            return False
+        if d["task_id"] and not d.get("dc_working"):
+            return False            # busy with central / orchestrated work
+        state = d["state"]
+        if state in ("ready", "patrolling", "enroute", "observing"):
+            return True
+        if state == "charging":
+            return d["battery"] >= .6
+        if state == "returning":
+            return d["battery"] >= .5 and not d["task_id"]
+        return False
+
+    def path_score(self, sim, tasks):
+        """Own score of flying ``tasks`` in order: time-discounted sub-task priority, None if the payload does
+        not fit or the energy (incl. the recovery leg home and a reserve) is not enough."""
+        d = self.drone
+        pos, t, total, dist, hover = d["position"], 0.0, 0.0, 0.0, 0.0
+        for task in tasks:
+            if task["kind"] == "supply" and (d["payload"] != task.get("payload") or d["payload_stock"] <= 0):
+                return None
+            leg = math.hypot(task["position"][0] - pos[0], task["position"][1] - pos[1]) * 1.15
+            dist += leg
+            t += leg / 18.0
+            total += task["priority"] * math.exp(-t / 300.0)
+            t += task["duration"]
+            hover += task["duration"] * 0.075
+            pos = task["position"]
+        home = d.get("home", sim._base)
+        dist += math.hypot(home[0] - pos[0], home[1] - pos[1]) * 1.15
+        if d["energy_wh"] < dist * 0.018 + hover + 29:
+            return None
+        return total * (0.9 + 0.1 * d["battery"])
+
+    def coordinate(self, sim, layer, t, inbox):
+        """One decentralized step: merge radio messages, detect lost peers, derive sub-tasks from what this
+        aircraft sees, rebuild its bundle, execute the head of its path, and broadcast if anything changed."""
+        from swarm_ops.cbba import mission_subtasks
+        d, c = self.drone, self.cbba
+        for message in inbox:
+            payload = message["payload"]
+            if message["kind"] == "mission":
+                mission = payload.get("mission")
+                if mission and c.add_mission(mission, t):
+                    new = c.add_tasks(mission_subtasks(mission, layer.stations, layer.mesh.radio_range_m, layer.mesh.gateway_range, self.id, t))
+                    self.decide("subtask_generated", f"heard mission {mission['id']} on the command link; derived {', '.join(new) or 'nothing new'}",
+                                incident_id=mission["id"], decision_source="cbba")
+                if payload.get("close") and c.close_mission(payload["close"], t):
+                    self.decide("mission_closed", f"command closed mission {payload['close']}", incident_id=payload["close"], decision_source="cbba")
+            elif message["kind"] == "consensus":
+                self.gw_adverts[payload["from"]] = (payload.get("gw_hops"), t)
+                c.receive(payload, t)
+        # hops to a gateway: distance-vector over neighbours' fresh adverts (0 = hears the command link itself)
+        if layer.hears_command(self.id):
+            self.gw_hops = 0
+        else:
+            fresh = [h for h, heard in self.gw_adverts.values() if h is not None and t - heard <= 6.0]
+            self.gw_hops = min(fresh) + 1 if fresh else None
+        for peer, held in c.check_peers(t).items():
+            if held:
+                self.decide("peer_lost", f"nothing heard from {peer} for {c.peer_timeout:.0f} s; its sub-tasks {', '.join(held)} are open again",
+                            decision_source="cbba")
+        current = d.get("subtask")
+        if current and d["state"] not in ("enroute", "observing"):
+            c.abandon(current, t)
+            d.update(subtask=None, dc_working=False)
+            self.decide("cbba_release", f"gave up {current} ({d['state']}); a peer can take it over", decision_source="cbba")
+        if d.get("dc_working") and d["state"] == "observing" and t >= self._next_scene_look:
+            self.look_at_scene(sim, layer, t)
+        self._discover_relay(sim, layer, t)
+        if self.can_bid():
+            c.build_bundle(lambda tasks: self.path_score(sim, tasks), t)
+        elif not d.get("dc_working"):
+            for j in [j for j in c.bundle if j not in c.locked]:
+                c.abandon(j, t, cooldown=5.0)
+        self._trace_cbba(c)
+        self.execute_head(sim, layer, t)
+        if c.changed or t >= self._next_heartbeat:
+            msg = c.message(t)
+            msg["gw_hops"] = self.gw_hops
+            layer.mesh.broadcast(self.id, msg, t, ttl=1, kind="consensus")
+            c.changed = False
+            self._next_heartbeat = t + layer.heartbeat_s
+
+    def _trace_cbba(self, c):
+        names = {"bid": "cbba_bid", "outbid": "cbba_outbid", "takeover": "cbba_takeover", "abandon": "cbba_release"}
+        for kind, task, detail in c.events:
+            reason = {"bid": f"bids {detail} on {task}", "outbid": f"outbid on {task} by {detail}; releases it and the rest of its bundle",
+                      "takeover": f"takes over {task} from a lost peer (bid {detail})", "abandon": f"releases {task}"}[kind]
+            self.decide(names[kind], reason, incident_id=c.tasks.get(task, {}).get("mission_id"), decision_source="cbba")
+        c.events.clear()
+
+    def _discover_relay(self, sim, layer, t):
+        from swarm_ops.cbba import _task
+        d, c = self.drone, self.cbba
+        if not (d.get("dc_working") and d["state"] == "observing" and d.get("subtask_kind") != "relay" and self.gw_hops is None):
+            self.memory["no_gateway_since"] = None
+            return
+        since = self.memory.get("no_gateway_since")
+        if since is None:
+            self.memory["no_gateway_since"] = t
+            return
+        mid = d.get("subtask_mission")
+        if t - since < 6.0 or not mid or not layer.stations:
+            return
+        station = min(layer.stations, key=lambda s: math.hypot(s[0] - d["position"][0], s[1] - d["position"][1]))
+        mid_point = ((d["position"][0] + station[0]) / 2, (d["position"][1] + station[1]) / 2)
+        mission = c.missions.get(mid) or {"severity": 3}
+        new = c.add_tasks([_task(mid, "relay-link", "relay", mid_point, self.id, t, mission.get("severity", 3))])
+        if new:
+            self.decide("relay_needed", f"no radio route to any gateway for {t - since:.0f} s; announces relay sub-task {new[0]}", incident_id=mid,
+                        decision_source="cbba")
+
+    def look_at_scene(self, sim, layer, t):
+        from swarm_ops.cbba import SUPPLY_ITEMS, scene_subtasks
+        self._next_scene_look = t + 5.0
+        d, c = self.drone, self.cbba
+        task = c.tasks.get(d.get("subtask") or "")
+        if not task or task["kind"] not in ("assess", "overwatch", "handover"):
+            return
+        mid = task["mission_id"]
+        incident = sim._find_incident(mid)
+        if incident is None:
+            return
+        seen = self.memory.setdefault("handover_seen", {})
+        if incident["status"] == "resolved" or (incident["handed_over"] and t - seen.setdefault(mid, t) >= 20.0):
+            if c.close_mission(mid, t):
+                self.decide("mission_closed", f"sees the ground crew in charge of {mid}; closes the mission for the swarm", incident_id=mid,
+                            decision_source="cbba")
+            return
+        hazards = [h for h in ((incident.get("briefing") or {}).get("hazards") or []) if h and h != "none"]
+        coming = any(r.get("incident_id") == mid and r["state"] in ("enroute", "awaiting_handoff")
+                     and math.hypot(r["position"][0] - incident["position"][0], r["position"][1] - incident["position"][1]) <= 1500 for r in sim.resources)
+        observation = {"people": incident["people"], "people_uncertain": incident["observations"] <= 1 and incident["people"] >= 3,
+                       "hazards": hazards, "needs_unmet": [n for n in incident["needs"] if n in SUPPLY_ITEMS and n not in incident["supplied"]],
+                       "ground_unit_coming": coming and not incident["handed_over"], "severity": incident["severity"], "category": incident["category"]}
+        mission = c.missions.get(mid) or {"id": mid, "position": incident["position"], "severity": incident["severity"]}
+        new = c.add_tasks(scene_subtasks(mission, observation, self.id, t, sim.bounds))
+        if new:
+            self.decide("subtask_generated", f"on scene at {mid} ({incident['people']} people, hazards {', '.join(hazards) or 'none seen'}): derives {', '.join(new)}",
+                        incident_id=mid, decision_source="cbba")
+
+    def execute_head(self, sim, layer, t):
+        from swarm_ops.cbba import LOCK
+        d, c = self.drone, self.cbba
+        head = c.path[0] if c.path else None
+        current = d.get("subtask")
+        working = d.get("dc_working")
+        if head is not None and head == current and working:
+            return
+        if head is None:
+            d["subtask"] = None
+            if working:
+                d["dc_working"] = False
+                if d["state"] in ("enroute", "observing"):
+                    why = f"{current} no longer in own bundle (taken by a peer or closed)" if current else "own bundle empty: sub-tasks complete"
+                    self.decide("return", why, incident_id=d.get("task_id"), decision_source="cbba")
+                    sim._return(d, "decentralized sub-tasks complete" if not current else f"{current} handled by a peer")
+            return
+        if not self.can_bid():
+            return
+        if not c.committed(head, t, layer.commit_s):
+            return                       # tentative claim: let consensus settle before flying
+        task = c.tasks[head]
+        kind, mid = task["kind"], task["mission_id"]
+        scene = kind in ("assess", "overwatch", "handover", "supply")
+        incident = sim._find_incident(mid)
+        target = list(incident["position"]) if scene and incident else [*task["position"], 0.0]
+        observe = kind in ("assess", "overwatch", "handover")
+        route = sim._drone_path(d, target, standoff=sim.STANDOFF_M if observe else 0.0, observe=observe)
+        if route is None:
+            c.abandon(head, t)
+            self._trace_cbba(c)
+            return
+        launched = d["state"] in ("ready", "charging")
+        d.update(state="enroute", route=route, subtask=head, subtask_kind=kind, subtask_started=None, subtask_mission=mid, dc_working=True,
+                 task_id=mid if scene else None, coverage_task=None, search_target=None, retasked=None, delivered=False)
+        if incident and scene and incident["status"] in ("reported", "open", "pending"):
+            incident["status"] = "responding"
+        bid = c.y.get(head, 0.0)
+        bid = bid - LOCK if bid >= LOCK else bid
+        self.decide("cbba_execute", f"flies to {head} ({kind}); own bid {bid:.1f}, own path {', '.join(c.path)}" + (f" (was {current})" if current else ""),
+                    incident_id=mid, decision_source="cbba")
+        if launched:
+            sim._event("drone_launch", f"{d['id']} launches for {head} ({kind}); won by decentralized consensus, no central award.", mid)
+
+    def work_subtask(self, sim, delta):
+        d, c = self.drone, self.cbba
+        j = d.get("subtask")
+        task = c.tasks.get(j) if c and j else None
+        if task is None:
+            return                      # the scheduler gives the next head (or recalls) this step
+        if j in c.done or task["mission_id"] in c.closed:
+            d["subtask"] = None
+            return
+        incident = sim._find_incident(task["mission_id"])
+        kind = task["kind"]
+        if d["state"] == "enroute":
+            if d["route"]:
+                return
+            d["state"] = "observing"
+            d["subtask_started"] = sim.t
+            c.lock(j)
+            if kind == "assess" and incident:
+                self.start_observing(sim)
+                sim.decentral.report(self, task, incident)
+                self.look_at_scene(sim, sim.decentral, sim.t)
+            elif kind == "supply" and incident:
+                item = d["payload"]
+                if d["payload_stock"] > 0 and item in incident["needs"] and item not in incident["supplied"]:
+                    incident["supplied"].append(item)
+                    d.update(payload_stock=d["payload_stock"] - 1, delivered=True, delivered_at=sim.t)
+                    sim._event("supply", f"{d['id']} dropped its own {item} at {incident['id']} (sub-task {j}); incident remains open.", incident["id"])
+                    self.bus.post(self.id, "swarm", "report", f"{self.id} dropped {item} at {incident['id']} (sub-task {j}).", incident["id"],
+                                  incident.get("request_id"), {"supplied": item, "subtask": j})
+                self._finish_subtask(sim, j, f"own {item} dropped")
+                return
+            else:
+                sim._event("subtask_on_station", f"{d['id']} on station for {j} ({kind}).", task["mission_id"])
+            self.decide("cbba_on_station", f"{j} ({kind}) started; claim locked", incident_id=task["mission_id"], decision_source="cbba")
+            return
+        elapsed = sim.t - (d.get("subtask_started") or sim.t)
+        if kind == "assess":
+            if incident and sim.t - (incident["last_observed"] or 0) > 4:
+                sim._brief(incident, d)
+            if elapsed >= task["duration"]:
+                self._finish_subtask(sim, j, "scene assessed and reported")
+        elif kind == "search":
+            if elapsed >= task["duration"]:
+                self._finish_subtask(sim, j, "sector searched")
+        elif kind == "handover":
+            if incident is None or incident["handed_over"] or incident["status"] == "resolved":
+                self._finish_subtask(sim, j, "arriving ground unit briefed and in charge")
+            elif elapsed >= 300:
+                self._finish_subtask(sim, j, "handover window elapsed")
+        elif kind == "overwatch":
+            if incident is None or incident["status"] == "resolved" or elapsed >= 240:
+                self._finish_subtask(sim, j, "overwatch period complete")
+        # relay: holds until the mission is closed (or energy forces a release)
+
+    def _finish_subtask(self, sim, j, why):
+        self.cbba.complete(j, sim.t)
+        self.drone["subtask"] = None
+        mid = self.cbba.tasks.get(j, {}).get("mission_id")
+        self.decide("subtask_done", f"{j}: {why}", incident_id=mid, decision_source="cbba")
+        sim.decentral.note_done(self.id, j)
 
 
 # ---------------------------------------------------------------- coordinator

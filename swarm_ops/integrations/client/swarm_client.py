@@ -105,6 +105,9 @@ class SwarmClient:
     def send_unassign(self, incident_id, drone_ids=(), resource_ids=()):
         return self.send("unassign", {"incident_id": incident_id, "drone_ids": list(drone_ids), "resource_ids": list(resource_ids)})
 
+    def send_set_coordination(self, mode, incident_id=None, **params):
+        return self.send("set_coordination", {"mode": mode, **({"incident_id": incident_id} if incident_id else {}), **params})
+
     def send_recall_drone(self, drone_id, reason="recalled"):
         return self.send("recall_drone", {"drone_id": drone_id, "reason": reason})
 

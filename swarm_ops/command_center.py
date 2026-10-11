@@ -361,6 +361,10 @@ class CommandCenter:
     async def unassign(self, incident_id, drone_ids=(), resource_ids=()):
         return await self.send("unassign", {"incident_id": incident_id, "drone_ids": list(drone_ids), "resource_ids": list(resource_ids)})
 
+    async def set_coordination(self, mode, incident_id=None, **params):
+        """central | decentralized | orchestrated, globally or for one incident (see docs/DECENTRALIZED.md)."""
+        return await self.send("set_coordination", {"mode": mode, **({"incident_id": incident_id} if incident_id else {}), **params})
+
     async def recall_drone(self, drone_id, reason="recalled by command center"):
         return await self.send("recall_drone", {"drone_id": drone_id, "reason": reason})
 

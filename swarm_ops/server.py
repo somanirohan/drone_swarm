@@ -30,10 +30,10 @@ from websockets.http11 import Response
 ROOT = Path(__file__).resolve().parents[1]  # repository root (swarm_ops/..)
 PROTOCOL = 'disruptionops.swarm.v2'
 COMMANDS = {'random_scenario', 'scenario', 'pause', 'resume', 'speed', 'reset',
-            'fault', 'release_resource', 'ack_handoff', 'fleet', 'detect', 'random_incident'}
+            'fault', 'release_resource', 'ack_handoff', 'fleet', 'detect', 'random_incident', 'set_coordination'}
 INTEGRATION_COMMANDS = {'external_resource_update', 'agency_request', 'control', 'orchestrate_incident', 'assign', 'unassign',
                         'recall_drone', 'cancel_incident', 'close_incident', 'update_incident',
-                        'request_situation', 'node_attach', 'node_detach', 'node_order', 'node_post'}
+                        'request_situation', 'node_attach', 'node_detach', 'node_order', 'node_post', 'set_coordination'}
 OLD_WEB_PATHS = {'/web/operations.html': '/web/ops/operations.html',
                  '/web/operations.css': '/web/ops/operations.css',
                  '/web/operations.js': '/web/ops/operations.js',
@@ -366,7 +366,7 @@ async def main_async(args):
     # --world pcmc-region starts on a PCMC scenario; built-in scenarios keep the Pune district world.
     scenario = args.scenario or ('pccoe_pawana_night' if args.world == 'pcmc-region' else 'rooftop_flood')
     setup_logging()
-    engine = OperationsSimulation(world=world, seed=args.seed, fleet_size=args.fleet, scenario=scenario)
+    engine = OperationsSimulation(world=world, seed=args.seed, fleet_size=args.fleet, scenario=scenario, coordination=args.coordination)
     server = OperationsServer(engine, host=args.host, port=args.port, frame_hz=args.frame_hz,
                               control_token=os.environ.get('OPS_CONTROL_TOKEN'))
     runtime_dir = ROOT / '.cache' / 'operations'
@@ -392,6 +392,8 @@ def main():
     parser.add_argument('--frame-hz', type=int, default=10)
     parser.add_argument('--world', choices=('pune-district', 'pcmc-region'), default='pune-district')
     parser.add_argument('--scenario', default=None, help='starting scenario id (see /ops/scenarios)')
+    parser.add_argument('--coordination', choices=('central', 'decentralized', 'orchestrated'), default='central',
+                        help='swarm coordination: central auction (default), decentralized CBBA consensus, or orchestrated by DisruptionOps')
     args = parser.parse_args()
     try:
         asyncio.run(main_async(args))
