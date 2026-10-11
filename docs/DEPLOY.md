@@ -18,6 +18,58 @@ Check the effective configuration (secrets shown only as booleans): `GET /ops/co
 ## Local
 `python -m swarm_ops.cli --world pcmc-region` (or `swarm-ops` after `pip install .`). Open http://localhost:8787 on the same machine to be granted control.
 
+## Verified PowerShell launcher for DisruptionOps
+
+```powershell
+.\scripts\launch-for-disruptionops.ps1 -Fleet 20
+# Optional map and peer coordination:
+.\scripts\launch-for-disruptionops.ps1 -World pcmc-region -Coordination decentralized
+# Isolated local verification; exits and stops its own server after checking:
+.\scripts\launch-for-disruptionops.ps1 -Port 8879 -Fleet 5 -NoTunnel -VerifyOnly
+```
+
+Requires Windows PowerShell/PowerShell 7, Python 3.12+ with the requirements installed,
+and `cloudflared` in `.tools/cloudflared.exe` or PATH. The launcher uses `swarm_ops.server`,
+binds to loopback, and forwards it through a temporary Cloudflare Quick Tunnel.
+
+Before advertising a connection it verifies `/health`, a real snapshot, view-only command
+rejection, integration-token authorization and the requested ground-orchestrator control.
+For a public URL it also verifies that `/ops/session` cannot disclose the operator token
+and that the WebSocket reaches the same exercise as localhost. It fails rather than
+publishing an unverified address. Python preflight: `scripts/verify-swarm-connection.py`.
+
+The default `-Orchestrator external` disables the built-in ground dispatcher so DisruptionOps
+can own agency allocation. Aerial coordination defaults to `central`; select `decentralized`
+or `orchestrated` explicitly, or change it using authorized controls. To demonstrate the
+built-in ground dispatcher instead, pass `-Orchestrator internal`. Resetting/changing a
+scenario can reset engine authority; an external client should reassert its control after
+the run changes. A reused server retains its fleet/world/coordination; the launcher verifies
+and reports its actual snapshot rather than assuming the command-line values applied.
+
+After verification, these **private, git-ignored** files are written:
+
+| File under `.cache/share/` | Use |
+|---|---|
+| `disruptionops.env` | Copy `SWARM_AGENCY`, `SWARM_WS_URL`, `SWARM_INTEGRATION_TOKEN` into the DisruptionOps backend environment |
+| `integration-token.txt` | Reused private integration secret; never paste it into public chat/logs |
+| `friend-operator-link.txt` | Private browser link granting exercise controls |
+| `connection.json` | Secret-free verified viewer/WS URL, actual fleet/mode and owned process IDs; `stopped_at` means that launcher session ended |
+| `launch-<timestamp>-<pid>/` | Logs for this invocation |
+
+Tokens are not printed or copied to the clipboard. Keep the launcher terminal open.
+Ctrl+C cleans up only the server/tunnel processes started by that invocation; a server
+reused from another session is left running. `-VerifyOnly` verifies and then exits, so
+its URLs are not a persistent share session. An existing server with another integration
+token fails preflight: restart it yourself with the shared token or use a free port.
+
+On the DisruptionOps side, the environment settings require the existing adapter to be
+installed/mounted as described in [the patch README](../swarm_ops/integrations/disruptionops_patch/README.md).
+The launcher does not apply database migrations or modify that other repository.
+Client calls and examples: [integration kit](INTEGRATION-KIT.md) and [friend guide](FRIEND-TEST-GUIDE.md).
+
+Quick Tunnel addresses change on restart and stop working when the tunnel stops; they are
+for testing. [Cloudflare Quick Tunnel documentation](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
+
 ## Docker
 ```
 docker build -t swarm-ops .
