@@ -39,7 +39,9 @@ async def verify(base, token, orchestrator=None, require_public=False, progress=
                 raise ValueError('Public session leaked operator authorization')
             progress('public session is read-only')
         progress('opening viewer WebSocket')
-        async with connect(uri, proxy=None, max_size=8*1024*1024, open_timeout=10, close_timeout=3) as viewer:
+        async with connect(uri, proxy=None, max_size=8*1024*1024, open_timeout=10,
+                           close_timeout=3, happy_eyeballs_delay=0.25) as viewer:
+            progress('viewer connected; waiting for snapshot')
             packet = await receive(viewer, 'snapshot')
             progress('viewer snapshot received')
             if packet.get('protocol') != PROTOCOL or packet['state'].get('schema_version') != 2:
@@ -52,7 +54,9 @@ async def verify(base, token, orchestrator=None, require_public=False, progress=
             progress('viewer command rejection received')
         progress('viewer closed; opening integration WebSocket')
         async with connect(uri+'?'+urlencode({'token':token}), proxy=None,
-                           max_size=8*1024*1024, open_timeout=10, close_timeout=3) as integration:
+                           max_size=8*1024*1024, open_timeout=10, close_timeout=3,
+                           happy_eyeballs_delay=0.25) as integration:
+            progress('integration connected; waiting for snapshot')
             packet = await receive(integration, 'snapshot')
             progress('integration snapshot received')
             state = packet['state']
