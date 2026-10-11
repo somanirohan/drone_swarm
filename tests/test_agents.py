@@ -170,3 +170,92 @@ class ControlAndTrafficTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RouteTests(unittest.TestCase):
+    def test_sweep_lanes_parallel_evenly_spaced_and_mission_routes_clean(self):
+        sim = OperationsSimulation(fleet_size=6)
+        for _ in range(80): sim.step(1)
+        swept = [d for d in sim.drones if d["state"] == "patrolling" and d.get("sweep")]
+        self.assertTrue(swept)
+        for drone in swept:
+            pts = drone["sweep"]
+            legs = [(pts[i], pts[i + 1]) for i in range(0, len(pts) - 1, 2)]
+            angles = [math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) % 180 for a, b in legs if math.dist(a[:2], b[:2]) > 1]
+            for a in angles:
+                d = min(abs(a - angles[0]), 180 - abs(a - angles[0]))
+                self.assertLess(d, 2)
+            horizontal = min(abs(angles[0] - 90), 90) > 45 if angles else True
+            offs = sorted({round(a[1] if horizontal else a[0], 1) for a, _ in legs})
+            gaps = [y - x for x, y in zip(offs, offs[1:]) if y - x > 5]
+            if len(gaps) > 1:
+                mean = sum(gaps) / len(gaps)
+                self.assertTrue(all(abs(g - mean) / mean < .1 or abs(g / mean - round(g / mean)) < .1 for g in gaps))
+            view = next(v for v in sim.snapshot(include_world=False)["drones"] if v["id"] == drone["id"])
+            self.assertEqual(view["route_kind"], "sweep")
+        sim2 = OperationsSimulation(fleet_size=6)
+        r = request(sim2, "ORCH-RT")
+        inc = sim2._find_incident(r["incident_id"])
+        drone = next(d for d in sim2.drones if d["id"] == inc["drone_id"])
+        sweep_before = [list(p) for p in drone.get("sweep") or []]
+        view = next(v for v in sim2.snapshot(include_world=False)["drones"] if v["id"] == drone["id"])
+        self.assertEqual(view["route_kind"], "mission")
+        self.assertFalse(any(p in drone["route"] for p in sweep_before))
+
+
+class OrchestratedTests(unittest.TestCase):
+    def orch(self, sim, rid, **kw):
+        p = {"request_id": rid, "external_id": "EXT-" + rid, "position": [-100, -200], "category": "medical", "people": 3,
+             "assignments": {"drones": [{"count": 1, "role": "assess"}], "resources": [{"id": "PC-AMB-06", "kind": "ambulance", "position": [-300, -300]}]}}
+        p.update(kw)
+        return sim.command("orchestrate_incident", p)
+
+    def test_orchestrate_executes_only_assignments_and_is_idempotent(self):
+        sim = OperationsSimulation(fleet_size=10)
+        r = self.orch(sim, "O1")
+        self.assertTrue(r["ok"] and r["accepted"]); self.assertEqual(r["reply_kind"], "accept_full"); self.assertEqual(len(r["units"]), 1)
+        inc = sim._find_incident(r["incident_id"])
+        self.assertEqual(inc["control_mode"], "orchestrated"); self.assertEqual(inc["external_id"], "EXT-O1")
+        self.assertIn("PC-AMB-06", inc["assigned_units"]); self.assertEqual(inc["assigned_drones"], r["units"])
+        self.assertTrue(self.orch(sim, "O1").get("duplicate"))
+        for _ in range(30): sim.step(1)
+        self.assertEqual(inc["resource_requests"], [], "no self-raised resource requests")
+        self.assertEqual(sum(1 for d in sim.drones if d["task_id"] == inc["id"]), 1, "no self-assigned extra drones")
+        snap = sim.snapshot(include_world=False)
+        si = next(i for i in snap["incidents"] if i["id"] == inc["id"])
+        self.assertEqual((si["control_mode"], si["assigned_by"], si["external_id"]), ("orchestrated", "DisruptionOps", "EXT-O1"))
+        self.assertTrue(any(m["to"] == "command_center" and m["incident_id"] == inc["id"] for m in snap["messages"]))
+
+    def test_reply_kinds(self):
+        sim = OperationsSimulation(fleet_size=10)
+        self.assertEqual(self.orch(sim, "N1", position=None)["reply_kind"], "need_info")
+        self.assertEqual(self.orch(sim, "N2", position=[99999, 0])["reply_kind"], "decline_jurisdiction")
+        self.assertEqual(self.orch(sim, "N3", assignments={"drones": [{"id": d["id"]} for d in sim.drones if not d["task_id"]][:2]})["reply_kind"], "accept_full")
+        self.assertEqual(request(sim, "AR1")["reply_kind"], "accept_full")
+        self.assertEqual(request(sim, "AR2", position=[99999, 0])["reply_kind"], "decline_jurisdiction")
+        self.assertEqual(sim.command("agency_request", {"request_id": "AR3"})["reply_kind"], "need_info")
+        sim.command("control", {"autonomy": "paused"})
+        self.assertEqual(request(sim, "AR4")["reply_kind"], "decline_capacity")
+
+    def test_assign_unassign_recall_update_cancel_close_mixed(self):
+        sim = OperationsSimulation(fleet_size=10)
+        auto = request(sim, "AUTO", position=[200, 200], category="fire")
+        r = self.orch(sim, "O2", assignments={})
+        iid = r["incident_id"]
+        a = sim.command("assign", {"external_id": "EXT-O2", "drones": [{"id": "D03", "role": "assess"}], "resources": [{"id": "EXT-U1", "kind": "rescue", "position": [-150, -150]}]})
+        self.assertTrue(a["ok"]); self.assertIn("D03", a["assigned_drones"]); self.assertIn("EXT-U1", a["units"])
+        self.assertTrue(any(x["id"] == "EXT-U1" for x in sim.resources))
+        self.assertTrue(sim.command("update_incident", {"incident_id": iid, "people": 9, "severity": 5})["ok"])
+        inc = sim._find_incident(iid); self.assertEqual((inc["people"], inc["severity"]), (9, 5))
+        for _ in range(20): sim.step(1)
+        self.assertTrue(sim.command("recall_drone", {"drone_id": "D03"})["ok"])
+        self.assertNotIn("D03", inc["assigned_drones"])
+        self.assertTrue(sim.command("unassign", {"incident_id": iid, "resource_ids": ["EXT-U1"]})["ok"])
+        self.assertNotIn("EXT-U1", inc["assigned_units"])
+        self.assertTrue(sim.command("cancel_incident", {"incident_id": iid})["ok"]); self.assertEqual(inc["status"], "resolved")
+        r2 = self.orch(sim, "O3", position=[300, -100]); self.assertTrue(sim.command("close_incident", {"incident_id": r2["incident_id"]})["ok"])
+        self.assertEqual(sim._find_incident(r2["incident_id"])["outcome"], "completed")
+        self.assertFalse(sim.command("close_incident", {"incident_id": "I999"})["ok"])
+        autonomous = sim._find_incident(auto["incident_id"])
+        self.assertEqual(autonomous["control_mode"], "autonomous"); self.assertTrue(autonomous["resource_requests"])
+        for _ in range(10): sim.step(1)

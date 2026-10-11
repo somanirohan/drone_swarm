@@ -396,6 +396,8 @@ class SwarmCoordinator:
     def plan_response(self, incident, reason="evidence changed"):
         """Plan (or re-plan) one incident's response from its situation; apply it after validation."""
         sim = self.sim
+        if incident.get("control_mode") == "orchestrated":
+            return None  # DisruptionOps decides; the swarm never raises requests or self-assigns here
         situation = self.situation(incident)
         incident["situation"] = situation
         context = sim._planning_context()

@@ -31,7 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]  # repository root (swarm_ops/..)
 PROTOCOL = 'disruptionops.swarm.v2'
 COMMANDS = {'random_scenario', 'scenario', 'pause', 'resume', 'speed', 'reset',
             'fault', 'release_resource', 'ack_handoff', 'fleet', 'detect', 'random_incident'}
-INTEGRATION_COMMANDS = {'external_resource_update', 'agency_request', 'control'}
+INTEGRATION_COMMANDS = {'external_resource_update', 'agency_request', 'control', 'orchestrate_incident', 'assign', 'unassign',
+                        'recall_drone', 'cancel_incident', 'close_incident', 'update_incident'}
 OLD_WEB_PATHS = {'/web/operations.html': '/web/ops/operations.html',
                  '/web/operations.css': '/web/ops/operations.css',
                  '/web/operations.js': '/web/ops/operations.js',

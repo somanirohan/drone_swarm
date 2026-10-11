@@ -192,7 +192,7 @@ class RoundTrip(unittest.IsolatedAsyncioTestCase):
         real, ws = await self.connected(FakePorts())
         real.orchestrate = True
         try:
-            self.assertEqual(await real.orchestrate_once(), 0)
+            self.assertIn(await real.orchestrate_once(), (0, 1))  # 1 once the engine implements orchestrate_incident
             self.assertTrue(real.orchestrate_disabled or real.orchestrated)
         finally:
             await ws.close()

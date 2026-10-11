@@ -47,6 +47,7 @@ from swarm_ops.planning import FlightPlanner
 from swarm_ops.traffic import Traffic
 
 
+ORCH_COMMANDS = {'orchestrate_incident','assign','unassign','update_incident','cancel_incident','close_incident'}
 ANCHOR = [18.6526632, 73.7624378]
 SCENARIOS = {
     "rooftop_flood": ("Rooftop flood rescue", "Flood water strands families; rescue boats and reconnaissance respond together."),
@@ -794,7 +795,7 @@ class OperationsSimulation:
                     "severity":severity,"people":people,"needs":list(needs),"status":"reported","drone_id":None,
                     "resource_ids":[],"briefing":None,"handed_over":False,"required_kinds":list(required),
                     "completed_kinds":[],"supplied":[],"created_at":self.t,"uncertain_delivery":False,
-                    "source":source,"wait_reason":None,"observations":0,"last_observed":None,"supply_requests":[]}
+                    "source":source,"wait_reason":None,"control_mode":"autonomous","assigned_by":None,"external_id":None,"assigned_drones":[],"assigned_units":[],"observations":0,"last_observed":None,"supply_requests":[]}
         incident["evacuated_people"]=0;incident["hospitalised_people"]=0
         if building_id is None and category in ("fire","trapped","flood") and len(position)>2 and float(position[2])>0:
             found=self._building_at(position[:2],tolerance=5)
@@ -1234,6 +1235,8 @@ class OperationsSimulation:
         for incident in sorted(self.incidents,key=lambda i:(-i["severity"],i["created_at"],i["id"])):
             if incident["status"]=="resolved":continue
             incident["wait_reason"]=None
+            if incident.get("control_mode")=="orchestrated":
+                self._apply_assignments(incident);continue
             for kind in ([] if self.external_ground else incident["required_kinds"]):
                 if kind in incident["completed_kinds"]:continue
                 assigned=next((r for r in self.resources if _serves(r,kind) and r["incident_id"]==incident["id"]),None)
@@ -1397,6 +1400,143 @@ class OperationsSimulation:
         if any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in (severity,people)):raise ValueError("severity/priority and people must be numbers")
         return max(1,min(5,int(severity))),max(1,min(500,int(people)))
 
+    # ---- orchestrated mode: DisruptionOps decides, the swarm executes and reports ----
+    def _orch_say(self,incident,text,kind="status",event=None):
+        self.bus.post("swarm","command_center",kind,text,incident["id"],incident.get("request_id"),{"external_id":incident.get("external_id")})
+        self._event(event or "orchestrated_status",text,incident["id"])
+
+    def _orch_incident(self,payload):
+        key=payload.get("incident_id");ext=payload.get("external_id")
+        incident=next((i for i in self.incidents if (key and i["id"]==key) or (ext and i.get("external_id")==ext)),None)
+        if incident is None:raise ValueError("Unknown incident")
+        return incident
+
+    def _queue_assignments(self,incident,assignments):
+        assignments=assignments if isinstance(assignments,dict) else {}
+        pend=incident.get("pending_assign") or {"drones":[],"resources":[]}
+        incident["pending_assign"]=pend
+        for spec in assignments.get("drones") or []:
+            if isinstance(spec,dict):
+                count=1 if spec.get("id") else max(1,min(6,int(spec.get("count",1))))
+                pend["drones"].append({"id":spec.get("id"),"count":count,"role":str(spec.get("role","assess"))[:20],"payload":spec.get("payload")})
+        for spec in assignments.get("resources") or []:
+            if isinstance(spec,dict) and spec.get("id"):pend["resources"].append(dict(spec))
+        incident["assigned_by"]=incident.get("assigned_by") or "DisruptionOps"
+
+    def _apply_assignments(self,incident):
+        pend=incident.get("pending_assign")
+        if not pend or incident["status"]=="resolved" or self._paused():return
+        # ground units: catalogue unit -> its own station/route; unknown id -> external unit at the given position
+        keep=[]
+        for spec in pend["resources"]:
+            resource=next((r for r in self.resources if r["id"]==spec["id"]),None)
+            if resource is None:
+                resource=self.add_resource(str(spec.get("kind") or "rescue"),(self.nearest_road_point(list(spec.get("position") or incident["position"])[:2]) or list(spec.get("position") or incident["position"])[:2]),id=str(spec["id"])[:40],agency=spec.get("agency"),name=spec.get("name"))
+                resource["external"]=True
+            if resource.get("incident_id")==incident["id"]:continue
+            if resource["state"]!="available":
+                keep.append(spec);continue
+            route=self._resource_path(resource,incident)
+            if route is None and resource.get("external"):route=[[*incident["position"][:2],0.0]]  # external unit: straight line
+            if route is None:
+                keep.append(spec);continue
+            eta=spec.get("eta_s") if isinstance(spec.get("eta_s"),(int,float)) else self._route_distance(resource["position"],route)/9
+            resource.update(state="enroute",incident_id=incident["id"],route=route,eta=eta,acknowledged=False,arrived_at=None)
+            if resource["id"] not in incident["resource_ids"]:incident["resource_ids"].append(resource["id"])
+            if resource["id"] not in incident["assigned_units"]:incident["assigned_units"].append(resource["id"])
+            self._orch_say(incident,f"{resource['id']} ({resource['kind']}) dispatched as assigned by DisruptionOps, ETA {eta:.0f} s.",event="ground_dispatch")
+        pend["resources"]=keep
+        # drones: specific ids, or nearest feasible docked drones for a count
+        left=[]
+        for spec in pend["drones"]:
+            if spec.get("id"):pool=[d for d in self.drones if d["id"]==spec["id"]]
+            else:pool=sorted((d for d in self.drones if d["active"] and d["link"]),key=lambda d:(_distance(d["position"],incident["position"]),d["id"]))
+            need=spec["count"];launched=0
+            for drone in pool:
+                if launched>=need:break
+                if drone["state"] not in ("ready","patrolling") or drone["task_id"] or not drone["active"] or not drone["link"]:continue
+                if self.docks and self._launched()>=self._cap_total():break
+                agent=self.agents[drone["id"]]
+                offer=agent.bid(self,incident,self._drone_path)
+                if not offer.get("ok"):continue
+                agent.accept(self,incident,offer,f"assigned by DisruptionOps ({spec['role']})")
+                incident["drone_id"]=incident["drone_id"] or drone["id"];incident["status"]="responding"
+                if drone["id"] not in incident["assigned_drones"]:incident["assigned_drones"].append(drone["id"])
+                self._orch_say(incident,f"{drone['id']} launched as assigned by DisruptionOps ({spec['role']}), ETA {travel_eta(drone,offer['route']):.0f} s.",event="drone_launch")
+                launched+=1
+            if launched<need:left.append({**spec,"count":need-launched})
+        pend["drones"]=left
+        if left or pend["resources"]:incident["wait_reason"]="Assigned units not yet dispatchable (cap, energy or not available)"
+
+    def _orch_release(self,incident,reason,drones=None,units=None):
+        for did in list(incident["assigned_drones"] if drones is None else drones):
+            drone=next((d for d in self.drones if d["id"]==did),None)
+            if drone and drone["task_id"]==incident["id"]:self._return(drone,reason)
+            if did in incident["assigned_drones"]:incident["assigned_drones"].remove(did)
+        if incident["drone_id"] and incident["drone_id"] not in incident["assigned_drones"]:incident["drone_id"]=None
+        for rid in list(incident["assigned_units"] if units is None else units):
+            resource=next((r for r in self.resources if r["id"]==rid),None)
+            if resource and resource.get("incident_id")==incident["id"]:
+                resource.update(state="available",incident_id=None,route=[],eta=None,approach_until=None,arrived_at=None)
+            for lst in (incident["assigned_units"],incident["resource_ids"]):
+                if rid in lst:lst.remove(rid)
+
+    def _orchestrate_incident(self,payload):
+        request_id=payload.get("request_id")
+        if not isinstance(request_id,str) or not 1<=len(request_id)<=128:raise ValueError("request_id (1-128 characters) is required")
+        if request_id in self._agency_requests:return {**self._agency_requests[request_id],"duplicate":True}
+        def reply(accepted,reason,reply_kind,incident=None,units=()):
+            r={"request_id":request_id,"accepted":accepted,"reason":reason,"reply_kind":reply_kind,"incident_id":incident["id"] if incident else None,
+               "units":list(units),"assigned_drones":list(units),"external_id":payload.get("external_id"),"control_mode":"orchestrated"}
+            if reply_kind!="need_info":self._agency_requests[request_id]=r
+            self.bus.post("swarm","command_center","accept" if accepted else "decline",f"Orchestrated {request_id}: {reason}.",incident["id"] if incident else None,request_id,{"reply_kind":reply_kind})
+            return r
+        raw=payload.get("position");raw_category=payload.get("category")
+        missing=[k for k,v in (("position",raw),("category",raw_category)) if v in (None,"")]
+        if missing:return reply(False,"need "+" and ".join(missing),"need_info")
+        if not isinstance(raw,list) or len(raw)<2 or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in raw):raise ValueError("position must be two or three finite coordinates")
+        position=[float(raw[0]),float(raw[1]),0.0];b=self.world.get("bounds",[-600,-600,600,600])
+        if not (b[0]<=position[0]<=b[2] and b[1]<=position[1]<=b[3]):return reply(False,"outside the swarm's operating area","decline_jurisdiction")
+        if self._paused():return reply(False,"swarm autonomy paused by the command centre","decline_capacity")
+        if self._open_incidents()>=MAX_OPEN_INCIDENTS:return reply(False,"swarm at capacity","decline_capacity")
+        category=self._category(str(raw_category)[:40])
+        title,_,_,needs,_=self.INCIDENT_TEMPLATES[category]
+        severity,people=self._validated_numbers({"severity":payload.get("priority",payload.get("severity",3)),"people":payload.get("people",1)})
+        incident=self._incident(position,category,str(payload.get("title") or title)[:120],severity,people,needs,[],"orchestrator",defer_requests=True)
+        incident.update(request_id=request_id,control_mode="orchestrated",plan_owned=False,required_kinds=[],external_id=payload.get("external_id"),
+                        assigned_by=str(payload.get("requested_by") or "DisruptionOps")[:60],
+                        situation_report=payload.get("situation") if isinstance(payload.get("situation"),dict) else None)
+        assignments=payload.get("assignments") if isinstance(payload.get("assignments"),dict) else {}
+        planned=sum(1 if s.get("id") else max(1,min(6,int(s.get("count",1)))) for s in assignments.get("drones") or [] if isinstance(s,dict))
+        self._queue_assignments(incident,assignments)
+        self._orch_say(incident,f"Accepted orchestrated incident {incident['id']} ({category}); the swarm executes DisruptionOps' assignments only.",kind="accept",event="request_accepted")
+        self._apply_assignments(incident)
+        units=list(incident["assigned_drones"])
+        kind="accept_partial" if units and len(units)<planned else "delayed" if planned and not units else "accept_full"
+        return reply(True,"accepted; executing assignments",kind,incident,units)
+
+    def _orchestrator_command(self,action,payload):
+        if action=="orchestrate_incident":return self._orchestrate_incident(payload)
+        incident=self._orch_incident(payload)
+        if incident.get("control_mode")!="orchestrated" and action in ("assign","unassign"):
+            incident["control_mode"]="orchestrated";incident["assigned_by"]=incident.get("assigned_by") or "DisruptionOps"
+        if action=="assign":
+            self._queue_assignments(incident,payload);self._apply_assignments(incident)
+        elif action=="unassign":
+            self._orch_release(incident,"unassigned by DisruptionOps",payload.get("drone_ids") or [],payload.get("resource_ids") or [])
+            self._orch_say(incident,"Assignments removed by DisruptionOps.")
+        elif action=="update_incident":
+            if payload.get("people") is not None:incident["people"]=max(0,min(500,int(payload["people"])))
+            if payload.get("severity") is not None:incident["severity"]=max(1,min(5,int(payload["severity"])))
+            if isinstance(payload.get("situation"),dict):incident["situation_report"]=payload["situation"]
+            self._orch_say(incident,f"Incident updated: {incident['people']} people, severity {incident['severity']}.")
+        elif action in ("cancel_incident","close_incident"):
+            done=action=="close_incident";reason=str(payload.get("reason") or ("closed" if done else "cancelled"))[:120]
+            self._orch_release(incident,reason)
+            incident.update(status="resolved",resolved_at=self.t,pending_assign=None,closed_by="DisruptionOps",outcome="completed" if done else "cancelled")
+            self._orch_say(incident,f"Incident {'completed' if done else 'cancelled'} by DisruptionOps: {reason}.",event="incident_closed")
+        return {"incident_id":incident["id"],"external_id":incident.get("external_id"),"assigned_drones":list(incident["assigned_drones"]),"units":list(incident["assigned_units"]),"status":incident["status"]}
+
     def _agency_request(self,request,source,building_id=None,snap=True):
         """The swarm is an agency: it decides itself whether to accept a request, then runs its own operation."""
         stats=self._agency_stats;stats["requests_received"]+=1
@@ -1409,6 +1549,8 @@ class OperationsSimulation:
             result={"request_id":request["request_id"],"accepted":accepted,"reason":reason,"incident_id":incident["id"] if incident else None,
                     "merged":merged,"eta_s":None if eta is None else round(eta,1),"assigned_drones":list(drones),"plan":list(plan),
                     "position":list(incident["position"]) if incident else position,"source":source}
+            result["units"]=list(result["assigned_drones"])
+            result["reply_kind"]=("accept_full" if drones or merged else "delayed") if accepted else ("decline_jurisdiction" if "outside" in reason else "decline_capacity")
             self._agency_requests[request["request_id"]]=result
             self.coordinator.request_decided(request,result,checks)
             self._event("request_accepted" if accepted else "request_declined",
@@ -1611,28 +1753,65 @@ class OperationsSimulation:
         for drone in searchers:drone["zone"].sort()
         if self.t>0:self._event("zones",f"Search zones recomputed for {k} aircraft ({len(cells)} cells); {len(searchers)-k} in reserve.")
 
+    def sweep_lanes(self,cells,spacing,origin):
+        """Boustrophedon lanes over a zone: parallel, evenly spaced, along the zone's longest axis, clipped to
+        the zone's cells, joined at the nearest ends, starting at the lane end nearest `origin`."""
+        half=self.search_spacing/2
+        xs=[c["center"][0] for c in cells];ys=[c["center"][1] for c in cells]
+        x0,x1,y0,y1=min(xs)-half,max(xs)+half,min(ys)-half,max(ys)+half
+        along_x=(x1-x0)>=(y1-y0)
+        # work in (u along lane, v across lanes)
+        if along_x:cl=[(c["center"][0],c["center"][1]) for c in cells];u0,u1,v0,v1=x0,x1,y0,y1
+        else:cl=[(c["center"][1],c["center"][0]) for c in cells];u0,u1,v0,v1=y0,y1,x0,x1
+        n=max(1,int(math.ceil((v1-v0)/spacing)));step=(v1-v0)/n
+        lanes=[]
+        for k in range(n):
+            v=v0+step*(k+.5)
+            hit=sorted(u for u,w in cl if abs(w-v)<=half)
+            if not hit:continue
+            seg=[hit[0]-half,hit[0]+half]
+            for u in hit[1:]:
+                if u-half<=seg[1]+1e-6:seg[1]=u+half
+                else:lanes.append((v,seg[0],seg[1]));seg=[u-half,u+half]
+            lanes.append((v,seg[0],seg[1]))
+        if not lanes:return []
+        def xy(u,v):return [u,v] if along_x else [v,u]
+        o=origin[:2]
+        # start at the nearest end of the first or last lane, then walk the lanes from that side
+        ends=[(_distance(xy(lanes[i][1 if e==0 else 2],lanes[i][0]),o),i,e) for i in (0,len(lanes)-1) for e in (0,1)]
+        _,i0,e0=min(ends);order=lanes if i0==0 else lanes[::-1]
+        pts=[];cur=None
+        for v,ua,ub in order:
+            a_,b_=xy(ua,v),xy(ub,v)
+            first=(e0==0) if cur is None else _distance(cur,a_)<=_distance(cur,b_)
+            if cur is None and i0!=0:first=(e0==0)
+            seg=[a_,b_] if first else [b_,a_]
+            pts+=seg;cur=seg[-1]
+        return pts
+
     def _next_search(self,drone):
-        """Fly to the most likely unsearched cell of the drone's own zone, then sweep it."""
+        """Sweep the aircraft's own zone with parallel lanes (spacing = 2 x sensor radius x 0.9)."""
         zone=[self.search_cells[c] for c in drone.get("zone",[]) if not self.search_cells[c]["blocked"]]
         if not zone:return False
-        ranked=sorted(zone,key=lambda c:(-round(c["p"],3),_distance(c["center"],drone["position"][:2]),c["id"]))
-        for cell in ranked[:4]:
-            cx,cy=cell["center"]
-            h=self.search_spacing*.3
-            # Two-lane boustrophedon (lane spacing 0.6 cell ~ 2x sensor radius at cruise), entered at the
-            # corner nearest the drone so the sweep never doubles back through the cell centre.
-            corners=[[cx-h,cy-h],[cx+h,cy-h],[cx+h,cy+h],[cx-h,cy+h]]
-            first=min(range(4),key=lambda k:(_distance(corners[k],drone["position"][:2]),k))
-            corners=[c for c in corners[first:]+corners[:first] if not self._restricted(c,c)]
-            path=None if self._restricted([cx,cy],[cx,cy]) else self._drone_path(drone,[*(corners[0] if corners else [cx,cy]),0])
-            if path is None:
-                cell["blocked"]=True;self._zone_key=None
-                continue
-            altitude=path[-1][2]
-            legs=[[c[0],c[1],altitude] for c in corners[1:]]
-            drone.update(state="patrolling",route=path+legs,coverage_task=(cx,cy),search_target=cell["id"])
-            return True
-        return False
+        probe=self._drone_path(drone,[*zone[0]["center"],0])
+        altitude=probe[-1][2] if probe else 60.0
+        spacing=max(20.0,2*altitude*math.tan(SENSOR_HALF_ANGLE)*.9)
+        lanes=self.sweep_lanes(zone,spacing,drone["position"])
+        lanes=[p for p in lanes if not self._restricted(p,p)]
+        if not lanes:
+            for c in zone:c["blocked"]=True
+            self._zone_key=None
+            return False
+        path=self._drone_path(drone,[*lanes[0],0])
+        if path is None:
+            for c in zone:c["blocked"]=True
+            self._zone_key=None
+            return False
+        altitude=path[-1][2]
+        sweep=[[p[0],p[1],altitude] for p in lanes]
+        nearest=min(zone,key=lambda c:(_distance(c["center"],lanes[0]),c["id"]))
+        drone.update(state="patrolling",route=path+sweep[1:],sweep=sweep,coverage_task=tuple(nearest["center"]),search_target=nearest["id"])
+        return True
 
     @staticmethod
     def _move(entity,dt,velocity):
@@ -2031,6 +2210,8 @@ class OperationsSimulation:
                     kind=payload.get("kind","sos")
                     if kind not in REQUEST_KINDS:raise ValueError("kind must be one of sos, assess, supply, overwatch")
                     raw=payload.get("position")
+                    if raw is None:
+                        return {"ok":True,"action":action,"run_id":self.run_id,"revision":self.revision,"request_id":request_id,"accepted":False,"reason":"need position","reply_kind":"need_info","units":[],"assigned_drones":[],"incident_id":None}
                     if not isinstance(raw,list) or len(raw) not in (2,3) or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in raw):raise ValueError("position must be two or three finite coordinates")
                     raw_category=str(payload.get("category","medical"))[:40]
                     category=self._category(raw_category)
@@ -2041,6 +2222,17 @@ class OperationsSimulation:
                     created=self._agency_request({"request_id":request_id,"kind":kind,"position":([float(v) for v in raw]+[0.0])[:3],"category":category,
                         "people":people,"needs":needs,"priority":severity,"requested_by":str(payload.get("requested_by","orchestrator"))[:80],
                         "evidence":evidence,"title":evidence.get("report_text")},"orchestrator")
+            elif action in ORCH_COMMANDS:
+                created=self._orchestrator_command(action,payload)
+            elif action=="recall_drone":
+                drone=next((d for d in self.drones if d["id"]==payload.get("drone_id")),None)
+                if drone is None:raise ValueError("Unknown drone")
+                incident=self._find_incident(drone["task_id"])
+                if incident and incident.get("control_mode")=="orchestrated":
+                    self._orch_release(incident,str(payload.get("reason") or "recalled by DisruptionOps")[:100],[drone["id"]],[])
+                    self._orch_say(incident,f"{drone['id']} recalled by DisruptionOps.")
+                elif drone["state"] in ("enroute","observing","patrolling"):self._return(drone,str(payload.get("reason") or "recalled by DisruptionOps")[:100])
+                created={"drone_id":drone["id"],"state":drone["state"]}
             elif action=="external_resource_update":
                 if payload.get("source")!="disruptionops":raise ValueError("External updates require DisruptionOps source")
                 if payload.get("run_id") not in (None,self.run_id):raise ValueError("External update belongs to a different run")
@@ -2163,6 +2355,8 @@ class OperationsSimulation:
         moving=drone["active"] and drone["state"] not in ("ready","charging","lost_link")
         view["speed_mps"]=float(drone.get("speed_mps",0.0)) if moving else 0.0
         view["behavior"]=self._behavior(drone)
+        view["route_kind"]={"patrolling":"sweep","returning":"return","enroute":"mission","observing":"mission"}.get(drone["state"],"none")
+        view["sweep"]=[list(p) for p in drone.get("sweep") or []] if drone["state"]=="patrolling" else []
         view["last_decision"]=drone.get("last_decision")
         if drone["task_id"] and drone["state"] in ("enroute","observing"):
             # Hover (stand-off) point of the current incident task.
