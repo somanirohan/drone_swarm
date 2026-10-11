@@ -27,7 +27,7 @@ Written 2026-10-11 by the lead. "Verified by lead" means I ran or looked at it m
 | 19 | Example script that plays DisruptionOps | Done | `examples/disruptionops_simulator.py` (verified by lead: 3/3 accepted, real dispatches, why-texts) |
 | 20 | Right-side live ops log; Apple-style UI from the real DESIGN.md | Done | `docs/design/apple-DESIGN.md` (byte-identical to the GitHub file, verified), `web/ops/*` |
 | 21 | Routes look rigged (your screenshots) | Fixed | Sweeps are parallel lanes, hidden by default; mission line straight to target (verified by lead) |
-| 22 | Test-case audit; WebSocket fully controllable by DisruptionOps (it assigns drone + ambulance, we execute and show) | In progress | Commands landed (`orchestrate_incident`, `assign`, `unassign`, `recall_drone`, `update_incident`, `cancel_incident`, `close_incident`, `control`); `docs/TEST-AUDIT.md` written; 21-case orchestrated test matrix being written now |
+| 22 | Test-case audit; WebSocket fully controllable by DisruptionOps (it assigns drone + ambulance, we execute and show) | Done | Commands `orchestrate_incident`, `assign`, `unassign`, `recall_drone`, `update_incident`, `cancel_incident`, `close_incident`, `control`; G1–G21 matrix passes (`127ef56`, caveats in `docs/TEST-AUDIT.md`) |
 | 23 | Fetch and integrate new migrations (up to 038) | Done | 037 held reports, 038 agency replies; our patch renumbered to 039/040; swarm reply mapped to `reply_kind` |
 | 24 | Technical doc for your friend; deploy and give a link | Waiting on you | You asked to test first |
 
@@ -35,7 +35,7 @@ Written 2026-10-11 by the lead. "Verified by lead" means I ran or looked at it m
 - Not pushed since `71b80c6`; push needs your OK (remote is `tusharsingh-spring/drone_swarm`).
 - Never run against a real DisruptionOps; the DisruptionOps-side patch needs its 3 edits applied there.
 - Docker image not built; `render.yaml` not parsed.
-- Full suite last seen at 189 tests with 1 failure that was then fixed but not re-run end to end (agent-reported). I will run it before handing over.
+- Full suite run by lead on 2026-10-11: **211 tests, all pass** (213 s). Browser test and acceptance scripts not re-run in that pass.
 - The swarm declines new requests at 12 open incidents (deliberate cap; easy to raise).
 - Planned, not implemented: CBBA, behaviour trees/utility AI, START triage, learned risk model, PX4/Gazebo.
 - `docs/implementation/validation.md` still quotes old test counts.
