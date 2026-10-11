@@ -100,7 +100,7 @@ Every logic file of both systems, one line each, then the end-to-end flows. The 
 | `swarm_ops/command_center.py` | Orchestrator agent for the swarm: issues tasks, tracks lifecycle, commits ground units for resource requests, closes incidents; REAL-mode adapter skeleton. |
 | `swarm_ops/scenarios/` | Scenario and world registrations (region scenario `pccoe_pawana_night`; owned by the REGION work). |
 | `swarm_ops/integrations/disruptionops_bridge.py` | Durable outbox client to DO's optional `/drone/operations` adapter: coordinate transform, event/snapshot enqueue, poll external state back, validation. Off unless `DISRUPTIONOPS_BRIDGE=1`. |
-| `swarm_ops/integrations/disruptionops_patch/` | Proposed backend patch (migration 030 and `app/drone`) for DO; not applied. |
+| `swarm_ops/integrations/disruptionops_patch/` | Proposed backend patch (migrations 039-040 and `app/drone`) for DO; not applied. |
 | `web/ops/operations.{html,css,js}` | 3D viewer and operator console: renders snapshots, sends control commands. No decisions about the mission. |
 | `tools/build_agency_catalog.py`, `prepare_pcmc_region.py` | Read DO migrations 029/030 and write the agency catalog and PCMC world. |
 | `tools/prepare_operations_{map,heights,terrain}.py` | Fetch OSM, building heights, SRTM into local-metre world files. |
