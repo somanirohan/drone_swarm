@@ -153,8 +153,8 @@ function buildVehicle(kind){
 }
 function createResource(resource){
  const kind=resourceKind(resource),g=buildVehicle(kind),big=kind==='bus'?1.2:1.35;
- const tag=label(resource.agency?`${resource.id} · ${resource.agency}`:(resource.name||resource.id),RESOURCE_COLOR[kind]||'#e2d4b8',5);tag.position.y=kind==='bus'?7:6.5;tag.userData.s0=tag.scale.clone();tag.userData.prio=3;g.add(tag);
- g.position.copy(vec(resource.position));g.scale.setScalar(big);g.userData={kind:'resource',id:resource.id,vkind:kind,target:vec(resource.position),tag};actorsGroup.add(g);return g;
+ const tag=label(String(resource.id),RESOURCE_COLOR[kind]||'#e2d4b8',5);tag.position.y=kind==='bus'?7:6.5;tag.userData.s0=tag.scale.clone();tag.userData.prio=3;g.add(tag);
+ g.position.copy(vec(resource.position));g.scale.setScalar(big);g.userData={kind:'resource',id:resource.id,vkind:kind,target:vec(resource.position),tag,tagText:String(resource.id)};actorsGroup.add(g);return g;
 }
 
 function createIncident(incident){const group=new THREE.Group(),p=vec(incident.position);group.position.copy(p);const color=incident.severity==='critical'||incident.severity>=4?'#e8755e':'#e5985b';const ring=new THREE.Mesh(new THREE.RingGeometry(13,16,48),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.8,depthWrite:false}));ring.rotation.x=-Math.PI/2;ring.position.y=2;group.add(ring);const beam=new THREE.Mesh(new THREE.CylinderGeometry(2,13,110,20,1,true),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.24,depthWrite:false,side:THREE.DoubleSide}));beam.position.y=55;group.add(beam);const orb=new THREE.Mesh(new THREE.OctahedronGeometry(8),mats.orange);orb.position.y=62;group.add(orb);const tag=label(`${incident.id} · ${nice(incident.category)}`,color,7);tag.position.y=90;group.add(tag);group.userData={kind:'incident',id:incident.id,ring,orb,tag};if(incident.category==='fire'||/fire/i.test(incident.title||''))addFire(group);actorsGroup.add(group);return group;}
@@ -171,7 +171,7 @@ const FOOT_FALLBACK='#8fa3b1';
 const unitState=r=>({available:'Available',enroute:`En route${r.eta!=null?` · ETA ${Math.ceil(r.eta)}s`:''}`,on_scene:'On scene',awaiting_handoff:'On scene · awaiting briefing',evacuating:'Evacuating',busy:'Busy',holding:'Holding',unavailable:'Unavailable'}[r.state]||`${nice(r.state)}${r.eta!=null?` · ETA ${Math.ceil(r.eta)}s`:''}`);
 const ACTIVITY_TEXT={docked:'Parked on its dock pad, ready to launch',launching:'Taking off from the dock',transit:'Flying to its next task',scanning:'Sweeping the ground with its sensor to find people and hazards',assessing:'Hovering over an incident to assess it and brief responders',delivering:'Delivering supplies to people on the ground',returning:'Returning to its dock',charging:'Recharging on its dock',holding:'Holding position and waiting for tasking',failed:'Out of service'};
 const SCENARIO_TEXT={rooftop_flood:'Residents are stranded on rooftops as the river rises. Find them, brief ground teams and rescue by boat.',medical_supply:'Critical medical supplies must reach cut-off patients while the flood isolates the district.',blocked_bridge:'A blocked bridge forces evacuation by alternative routes while drones keep watch.',pccoe_pawana_night:'Night flood along the Pawana river in the PCMC region: coordinate drones, responders and lifelines across the wards.',pcmc_random:'Random incidents across the PCMC region. Drones scout, responders and the command center coordinate by message.',dock_fire:'Fires break out near the drone docks. Launch drones in waves, scout the fires and direct fire engines and rescue teams.'};
-const SIGNAL_KIND={sos:['SOS','#e5533d'],briefing:['Briefing','#2f80ed'],ack:['Acknowledged','#2e9e6b'],recall:['Recall','#8a6fd1'],dispatch:['Dispatch','#e08a2e'],arrival:['Arrived','#1f9d8f'],supply_request:['Supply request','#c2528a'],resource_request:['Needs resource','#d9822b']};
+const SIGNAL_KIND={sos:['SOS','#e5533d'],briefing:['Briefing','#2f80ed'],ack:['Acknowledged','#2e9e6b'],recall:['Recall','#8a6fd1'],dispatch:['Dispatch','#e08a2e'],arrival:['Arrived','#1f9d8f'],supply_request:['Supply request','#c2528a'],resource_request:['Needs resource','#d9822b'],dispatch_order:['Dispatch order','#e08a2e']};
 const kindMap=()=>({drone:droneObjects,resource:resourceObjects,incident:incidentObjects,dock:dockObjects});
 const itemsOf=kind=>kind==='drone'?state?.drones:kind==='resource'?state?.resources:kind==='dock'?state?.docks:state?.incidents;
 
@@ -327,7 +327,8 @@ const tubeR=region.on?Math.max(.7,Math.min(6,camDist/900)):.7;
  const hr=new THREE.Mesh(new THREE.RingGeometry(6,8,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#ffffff',side:THREE.DoubleSide,depthTest:false,transparent:true,opacity:.95}));hr.position.copy(hover);hr.renderOrder=6;selGroup.add(hr);
  const hs=new THREE.Mesh(new THREE.RingGeometry(3.2,4.6,24).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#000000',side:THREE.DoubleSide,depthTest:false}));hs.position.copy(hover);hs.renderOrder=7;selGroup.add(hs);
  const htag=label('Hover point','#000000',5);htag.position.copy(hover).add(new THREE.Vector3(0,24,0));selGroup.add(htag);
- const g0=groundHeight(hover.x,-hover.z);selGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([hover.clone(),new THREE.Vector3(hover.x,g0+1,hover.z)]),new THREE.LineBasicMaterial({color:'#000000'})))}
+ const g0=groundHeight(hover.x,-hover.z)+.8,hh=Math.max(1,hover.y-g0),pole=new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,hh,6),new THREE.MeshBasicMaterial({color:'#000000'}));pole.position.set(hover.x,g0+hh/2,hover.z);selGroup.add(pole);
+ const gr=new THREE.Mesh(new THREE.RingGeometry(3.2,4.4,28).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#000000',side:THREE.DoubleSide,depthTest:false,transparent:true,opacity:.85}));gr.position.set(hover.x,g0+.3,hover.z);gr.renderOrder=7;selGroup.add(gr)}
 }
 function stepSelectedFX(){
  const o=selected?.kind==='drone'?droneObjects.get(selected.id):null;
@@ -368,8 +369,8 @@ function stepSignals(now){
 }
 
 /* ====================== selection ====================== */
-function frameEntity(kind,id){const o=kindMap()[kind]?.get(id);if(!o)return;flyTo(o.position,{dist:kind==='incident'?95:kind==='dock'?130:kind==='resource'?80:75,entity:o})}
-function select(kind,id){selected={kind,id};cameraMode='focus';frameEntity(kind,id);selSignature='';renderUI();updateSelectedRoute()}
+function frameEntity(kind,id){const o=kindMap()[kind]?.get(id);if(!o)return;flyTo(o.position,{dist:kind==='incident'?170:kind==='dock'?180:kind==='resource'?130:150,entity:o,dur:1500})}
+function select(kind,id){selected={kind,id};cameraMode='focus';frameEntity(kind,id);selSignature='';renderUI();updateSelectedRoute();refreshResTags()}
 function focusSelected(){if(selected)frameEntity(selected.kind,selected.id);else toast('Select a drone, incident, responder or dock first.')}
 
 const isOrch=i=>!!i&&(i.control_mode==='orchestrated'||/disruptionops/i.test(String(i.assigned_by||'')));
@@ -391,7 +392,11 @@ function renderSelection(){
   const assigned=(state.resources||[]).filter(r=>r.incident_id===item.id),unmet=(item.needs||[]).filter(n=>!(item.supplied||[]).includes(n)),remaining=(item.required_kinds||[]).filter(n=>!(item.completed_kinds||[]).includes(n)),observed=item.last_observed??item.briefing?.observed_at;
   if(isOrch(item))html+='<p class="orch-badge">Assigned by DisruptionOps</p>';
   html+=`<p class="detail-status">${escapeHTML(nice(item.category))} / ${escapeHTML(nice(item.status))} / Priority ${escapeHTML(item.severity)}</p>`;
-  html+=row('People',(()=>{const c=peopleCounts(item.id);return c.total?`${c.waiting} waiting · ${c.progress} being helped · ${c.safe} safe`:`${item.people||0}`})())+row('Evacuated',`${item.evacuated_people||0} / ${item.people||0} people`)+row('Still needed',list(unmet))+row('Supplied',list(item.supplied))+row('Required response',list(item.required_kinds))+row('Completed response',list(item.completed_kinds))+row('Outstanding response',list(remaining))+row('Assigned drone',item.drone_id||'Awaiting assignment')+row('First on scene',item.first_on_scene?nice(item.first_on_scene):'Nobody yet')+row('Resource requests',(item.resource_requests||[]).map(r=>`${r.qty}x ${nice(r.needed_kind)} (${nice(r.status)}${r.fulfilled_by?.length?': '+r.fulfilled_by.join(', '):''})`).join('; ')||'None');
+  html+=row('People',(()=>{const c=peopleCounts(item.id);return c.total?`${c.waiting} waiting · ${c.progress} being helped · ${c.safe} safe`:`${item.people||0}`})())+row('Evacuated',`${item.evacuated_people||0} / ${item.people||0} people`)+row('Still needed',list(unmet))+row('Supplied',list(item.supplied))+row('Required response',list(item.required_kinds))+row('Completed response',list(item.completed_kinds))+row('Outstanding response',list(remaining))+row('Assigned drone',item.drone_id||'Awaiting assignment')+row('First on scene',item.first_on_scene?nice(item.first_on_scene):'Nobody yet'); 
+  {const sr=[...(state.messages||[])].reverse().find(m=>m.kind==='situation_report'&&m.incident_id===item.id);
+   if(sr)html+=`<div class="sit-card"><h4><span>Latest situation report</span><time>${clock(sr.t)}</time></h4>${sitInner(sr.body||{})}</div>`;
+   const orders=item.resource_requests||[];
+   html+=`<div class="sit-card"><h4><span>Dispatch orders</span></h4>${orders.length?`<div class="dsp-list">${orders.map(r=>{const ag=agencyOf(r.ordered_to||r.needed_kind);return `<div style="--c:${ag?ag[1]:'#8e8e93'}"><i></i><span><b>${escapeHTML(r.qty)}&times; ${escapeHTML(nice(r.needed_kind))}</b> from ${escapeHTML(nice(r.ordered_to||'agency'))}, ordered by ${escapeHTML(nice(r.ordered_by||'command center'))}${r.urgency?` &middot; ${escapeHTML(nice(r.urgency))}`:''} &middot; ${escapeHTML(nice(r.status))}${r.fulfilled_by?.length?` &rarr; ${escapeHTML(r.fulfilled_by.join(', '))}`:''}</span></div>`}).join('')}</div>`:'<p class="muted" style="margin:0">None yet. The command center has not ordered any unit.</p>'}</div>`}
   html+='<div class="detail-divider"></div>';
   html+=row('Assigned agencies',assigned.map(r=>`${r.name||r.agency||nice(r.kind)} (${r.id}${r.transport==='boat'?', boat':''})`).join(', ')||'Awaiting dispatch')+row('Ground briefing',item.handed_over?'Acknowledged':'Pending acknowledgment')+row('Last observation',observed==null?'Not yet observed':`${Math.max(0,Math.floor(state.t-observed))}s ago`)+row('Briefing source',item.briefing?.source||'No briefing yet');
   if(item.briefing?.summary)html+=`<p>${escapeHTML(item.briefing.summary)}</p>`;
@@ -405,6 +410,8 @@ function renderSelection(){
   if(act!==undefined)html+=row('Sensor footprint',r>0?`${r.toFixed(0)} m radius · ${area.toFixed(2)} ha`:'Not airborne')+row('Scan rate',r>0&&speed>0?`${rate.toFixed(1)} ha/min`:'—')+row('Ground speed',`${speed.toFixed(1)} m/s`);
   html+=row('State',nice(item.state))+row('Task',item.task_id||'No incident assignment')+row('Dock',item.dock_id||'—')+row('Radio link',item.link===false?'Lost':'Connected')+row('Battery',`${Math.round((item.battery||0)*100)}%`)+row('Energy remaining',`${Number(item.energy_wh||0).toFixed(1)} / ${Number(item.capacity_wh||0).toFixed(0)} Wh`)+row('Payload',nice(item.payload))+row('Supply stock',`${item.payload_stock??'—'} / ${item.payload_capacity??'—'}`)+row('Delivery',item.delivered?'Recorded delivered':'Not recorded delivered');
   if(item.link===false)html+='<p class="detail-warning">Radio link unavailable. Position and delivery status may be stale.</p>';
+  {const co=item.coordination;if(co&&(co.mode==='decentralized'||co.bundle?.length)){const nb=co.neighbours||[],lq=co.link_quality||{},bids=Object.entries(co.winning_bids||{}).slice(0,4);
+   html+='<div class="detail-divider"></div><p class="doing-now"><b>Decentralized coordination</b></p>'+row('Mode',nice(co.mode))+row('Gateway',co.gateway?'Yes, holds the command link':`No, ${co.hops_to_gateway??'?'} hop${co.hops_to_gateway===1?'':'s'} to a gateway`)+row('Bundle',co.bundle?.length?co.bundle.join(' > '):'Empty')+row('Winning bids',bids.map(([k,v])=>`${k} ${Number(v).toFixed(1)}`).join(' · ')||'None')+row('Neighbours',nb.length?`${nb.length}: ${nb.slice(0,6).map(id=>id+(lq[id]!=null?` ${Math.round(lq[id]*100)}%`:'')).join(', ')}${nb.length>6?', ...':''}`:'None in range')+row('Last consensus',co.last_consensus_t!=null?`${Math.max(0,state.t-co.last_consensus_t).toFixed(0)}s ago`:'-')+(co.known_peers_lost?.length?row('Lost peers',co.known_peers_lost.join(', ')):'')}}
   html+=decisionHTML(item,row);
  }else if(selected.kind==='dock'){
   const ids=item.drone_ids||[];html+=row('Docked',String(item.docked??'—'))+row('Launched',String(item.launched??'—'))+row('Drones',String(ids.length))+`<div class="dock-drones">${ids.map(id=>`<button data-select="drone" data-id="${escapeHTML(id)}">${escapeHTML(id)}</button>`).join('')}</div>`;
@@ -439,11 +446,10 @@ function renderUI(){
  patchList($('fleet-list'),drones,d=>`<button class="drone-card ${selected?.id===d.id?'selected':''}" data-select="drone" data-id="${escapeHTML(d.id)}"><div class="drone-top"><span><i class="capability-dot" style="background:${capabilityColor(d.payload)}"></i>${escapeHTML(d.id)}</span><span>${Math.round((d.battery||0)*100)}%</span></div><div class="drone-state"><i class="activity-dot" style="background:${ACTIVITY_COLOR[d.activity]||FOOT_FALLBACK}"></i>${escapeHTML(nice(d.activity||d.state))}</div><div class="battery-bar"><i style="width:${Math.round(Math.max(0,Math.min(100,(d.battery||0)*100)))}%;${d.battery<.25?'background:#eea17d':''}"></i></div></button>`);
  patchList($('resource-list'),resources,r=>`<div class="resource-card"><span class="resource-icon ${r.kind==='fire_engine'?'fire':''}">${/boat/i.test(r.transport||r.kind)?'◒':'▰'}</span><div><button class="resource-name" data-select="resource" data-id="${escapeHTML(r.id)}">${escapeHTML(r.name||`${r.id} · ${nice(r.kind)}`)}${!r.name&&r.transport==='boat'?' boat':''}</button><small>${escapeHTML(r.agency?r.agency+' · ':'')}<b class="unit-state ${escapeHTML(r.state)}">${escapeHTML(unitState(r))}</b>${r.incident_id?` · ${escapeHTML(r.incident_id)}`:''}</small></div><button data-release="${escapeHTML(r.id)}" title="${r.incident_id?'Committed until response completes':r.state==='available'?'Already available':'Make responder available'}" ${token&&connected&&!r.incident_id&&r.state!=='available'?'':'disabled'}>Release</button></div>`);
  if(document.activeElement!==$('fault-drone')){const old=$('fault-drone').value;setHTML($('fault-drone'),drones.map(d=>`<option value="${escapeHTML(d.id)}">${escapeHTML(d.id)}</option>`).join(''));if(drones.some(d=>d.id===old))$('fault-drone').value=old}
- const events=(state.events||[]).slice(-8).reverse();setHTML($('event-log'),events.map(e=>`<div><time>${clock(e.time)}</time>${escapeHTML(e.message)}</div>`).join('')||'Assessment underway. Waiting for activity.');
  const done=incidents.filter(i=>['resolved','completed'].includes(i.status)).length;$('timeline-progress').style.width=`${incidents.length?done/incidents.length*100:0}%`;
- renderSelection();renderCommand();
- const ag=metrics.agency,card=$('agency-card');if(ag){card.hidden=false;const t=v=>v==null?'—':v>=90?`${Math.floor(v/60)}m ${Math.round(v%60)}s`:`${Math.round(v)}s`,cell=(k,v)=>`<div><strong>${escapeHTML(v)}</strong><span>${escapeHTML(k)}</span></div>`;
-  setHTML($('agency-grid'),cell('Requests accepted',`${ag.accepted??0} / ${ag.requests_received??0}`)+cell('Declined',ag.declined??0)+cell('Time to first drone',t(ag.median_time_to_first_drone_s))+cell('Time to briefing',t(ag.median_time_to_briefing_s))+cell('Resource requests',`${ag.resource_requests_fulfilled??0} / ${ag.resource_requests_raised??0}`)+cell('Supplies delivered',ag.supplies_delivered??0)+cell('Drone first',ag.drone_first??0)+cell('Ground first',ag.ground_first??0))}else card.hidden=true;
+ renderSelection();renderCommand();renderMeshChip();
+ const ag=metrics.agency,card=$('agency-card');if(ag){card.hidden=false;$('agency-orders').textContent=`${ag.resource_requests_raised??0} orders`;const t=v=>v==null?'—':v>=90?`${Math.floor(v/60)}m ${Math.round(v%60)}s`:`${Math.round(v)}s`,cell=(k,v)=>`<div><strong>${escapeHTML(v)}</strong><span>${escapeHTML(k)}</span></div>`;
+  setHTML($('agency-grid'),(ag.requests_received?cell('Requests accepted',`${ag.accepted??0} / ${ag.requests_received??0}`)+cell('Declined',ag.declined??0):'')+cell('Time to first drone',t(ag.median_time_to_first_drone_s))+cell('Time to briefing',t(ag.median_time_to_briefing_s))+cell('Dispatch orders filled',`${ag.resource_requests_fulfilled??0} / ${ag.resource_requests_raised??0}`)+cell('Supplies delivered',ag.supplies_delivered??0)+cell('Handoffs',ag.handoffs??0)+cell('Drone first',ag.drone_first??0)+cell('Ground first',ag.ground_first??0))}else card.hidden=true;
 }
 
 function setConnection(on,message){connected=on;$('connection').textContent=on?'Connected':'Connection interrupted';$('connection').classList.toggle('offline',!on);$('operator-role').textContent=token?'Operator':'View only';$('operator-role').title=token?'Authenticated exercise operator':'Open locally or use an operator control link to enable commands';const note=$('view-only-note');if(note)note.hidden=!!token;if(!token&&addMode)setAddMode(false);document.querySelectorAll('[data-control]').forEach(el=>el.disabled=!on||!token);$('scene-notice').classList.toggle('hidden',on);$('scene-notice').classList.toggle('stale',!!state);$('scene-notice').textContent=message||(state?'Connection interrupted · displaying last received state':'Connecting to the operations server…');if(state&&!on)renderUI();}
@@ -451,7 +457,7 @@ function setConnection(on,message){connected=on;$('connection').textContent=on?'
 function clearRun(){
  disposeGroup(actorsGroup);disposeGroup(selGroup);disposeGroup(docksGroup);disposeGroup(footGroup);disposeGroup(coverageGroup);disposeGroup(trailGroup);disposeGroup(peopleGroup);disposeGroup(zoneGroup);peopleObjects.clear();zoneSignature='';
  for(const [id,r] of routeLines){routesGroup.remove(r.line);r.geo.dispose()}for(const [id,rec] of signalObjects)removeSignal(id,rec);
- droneObjects.clear();resourceObjects.clear();incidentObjects.clear();dockObjects.clear();footObjects.clear();routeLines.clear();seenSignals.clear();traffic.map.clear();logReset();leadIn=null;trailLine=null;selSignature='';coverageSignature='';
+ for(const g of mesh.subs.values()){scene.remove(g);disposeGroup(g)}mesh.subs.clear();mesh.pairs=[];mesh.subPairs=[];droneObjects.clear();resourceObjects.clear();incidentObjects.clear();dockObjects.clear();footObjects.clear();routeLines.clear();seenSignals.clear();traffic.map.clear();logReset();leadIn=null;trailLine=null;selSignature='';coverageSignature='';
 }
 
 function applySnapshot(packet){
@@ -459,7 +465,7 @@ function applySnapshot(packet){
  if(run!==next.run_id){run=next.run_id;sequence=-1;selected=null;clearRun();if(!next.world)disposeGroup(worldGroup)}
  sequence=packet.seq;state=next;const now=performance.now();if(lastPacket){const gap=now-lastPacket;if(gap<2000)packetDur=Math.max(60,Math.min(500,packetDur*.7+gap*.3))}lastPacket=now;
  if(next.world)buildWorld(next.world);updateDynamicWorld();
- syncDocks();syncActors(state.drones,droneObjects,createDrone,'drone');syncActors(state.resources,resourceObjects,createResource,'resource');syncActors(state.incidents,incidentObjects,createIncident,'incident');syncTraffic();syncOrch();ingestLog(state);
+ syncDocks();syncActors(state.drones,droneObjects,createDrone,'drone');syncActors(state.resources,resourceObjects,createResource,'resource');syncActors(state.incidents,incidentObjects,createIncident,'incident');syncTraffic();syncOrch();syncMesh();ingestLog(state);
  for(const o of incidentObjects.values()){if(o.userData.item?.handed_over)o.userData.ring.material.color.set('#89d8a8')}
  syncFootprints();syncSignals();syncPeople();syncSearch();checkNewIncident();updateRoutes();uiDirty=true;
  if(now-lastUI>250||!connected){renderUI();lastUI=now}
@@ -537,10 +543,10 @@ function updateZone(){
 }
 
 /* ====================== map layers ====================== */
-let showLabels=true,showBuildings=true,showRoads=true;
+let showLabels=true,showBuildings=true,showRoads=true,showMesh=true;
 function layerMeshes(){const b=[],r=[];const roadSet=new Set([mats.curb,mats.road,mats.stripe]);for(const o of worldGroup.children){if(!o.isMesh)continue;const m=Array.isArray(o.material)?o.material[0]:o.material;if(roadSet.has(m))r.push(o);else if(m.map||m===mats.roof||m===mats.darkRoof)b.push(o)}return{b,r}}
 function applyLayers(){const {b,r}=layerMeshes();b.forEach(o=>o.visible=showBuildings);r.forEach(o=>o.visible=showRoads);if(showLabels)camera.layers.enable(2);else camera.layers.disable(2)}
-for(const [id,key] of [['toggle-labels','Labels'],['toggle-buildings','Buildings'],['toggle-roads','Roads'],['toggle-search','Search']]){const el=$(id);if(el)el.onclick=()=>{const on=!el.classList.contains('active');el.classList.toggle('active',on);el.setAttribute('aria-pressed',String(on));if(key==='Labels')showLabels=on;if(key==='Buildings')showBuildings=on;if(key==='Roads')showRoads=on;if(key==='Search'){showSearch=on;searchSignature='';if(state){syncSearch();updateRoutes()}}applyLayers()}}
+for(const [id,key] of [['toggle-labels','Labels'],['toggle-buildings','Buildings'],['toggle-roads','Roads'],['toggle-search','Search'],['toggle-mesh','Mesh']]){const el=$(id);if(el)el.onclick=()=>{const on=!el.classList.contains('active');el.classList.toggle('active',on);el.setAttribute('aria-pressed',String(on));if(key==='Labels')showLabels=on;if(key==='Buildings')showBuildings=on;if(key==='Roads')showRoads=on;if(key==='Mesh')showMesh=on;if(key==='Search'){showSearch=on;searchSignature='';if(state){syncSearch();updateRoutes()}}applyLayers()}}
 
 /* ====================== rescue issues ====================== */
 const ISSUE_DEFAULT={medical:{title:'Operator-raised medical emergency',needs:['first_aid']},flood:{title:'Operator-raised flood rescue',needs:['rescue']},fire:{title:'Operator-raised fire',needs:['assessment']},trapped:{title:'Operator-raised trapped residents',needs:['rescue']},blocked_route:{title:'Operator-raised blocked route',needs:['assessment']}};
@@ -572,7 +578,7 @@ $('toggle-traffic').onclick=()=>{showTraffic=!showTraffic;$('toggle-traffic').cl
 $('toggle-coverage').onclick=()=>{showCoverage=!showCoverage;$('toggle-coverage').classList.toggle('active',showCoverage);$('toggle-coverage').setAttribute('aria-pressed',String(showCoverage));if(state)updateCoverage()};
 $('randomize').onclick=()=>command('random_scenario');$('scenario-select').onchange=e=>command('scenario',{id:e.target.value});$('fleet-select').onchange=e=>{command('fleet',{value:Number(e.target.value)});e.target.blur()};
 $('pause').onclick=()=>command(state?.paused?'resume':'pause');$('speed').onchange=e=>command('speed',{value:Number(e.target.value)});$('reset').onclick=()=>command('reset');
-document.addEventListener('click',e=>{const selectButton=e.target.closest('[data-select]');if(selectButton)select(selectButton.dataset.select,selectButton.dataset.id);const fault=e.target.closest('[data-fault]');if(fault)command('fault',{drone_id:$('fault-drone').value,kind:fault.dataset.fault});const release=e.target.closest('[data-release]');if(release)command('release_resource',{resource_id:release.dataset.release});const handoff=e.target.closest('[data-handoff]');if(handoff)command('ack_handoff',{incident_id:handoff.dataset.handoff,resource_id:handoff.dataset.resource});if(e.target.closest('[data-focus]'))focusSelected();const mm=e.target.closest('[data-msg-incident]');if(mm)focusMessage(mm.dataset.msgIncident,mm.dataset.msgAgent);const mc=e.target.closest('[data-msg-focus-incident]');if(mc)focusMessage(mc.dataset.msgFocusIncident);if(e.target.id==='close-selection'){selected=null;selSignature='';renderSelection();updateSelectedRoute()}});
+document.addEventListener('click',e=>{const selectButton=e.target.closest('[data-select]');if(selectButton)select(selectButton.dataset.select,selectButton.dataset.id);const fault=e.target.closest('[data-fault]');if(fault)command('fault',{drone_id:$('fault-drone').value,kind:fault.dataset.fault});const release=e.target.closest('[data-release]');if(release)command('release_resource',{resource_id:release.dataset.release});const handoff=e.target.closest('[data-handoff]');if(handoff)command('ack_handoff',{incident_id:handoff.dataset.handoff,resource_id:handoff.dataset.resource});if(e.target.closest('[data-focus]'))focusSelected();const mm=e.target.closest('[data-msg-incident]');if(mm)focusMessage(mm.dataset.msgIncident,mm.dataset.msgAgent);const mc=e.target.closest('[data-msg-focus-incident]');if(mc)focusMessage(mc.dataset.msgFocusIncident);if(e.target.id==='close-selection'){selected=null;selSignature='';renderSelection();updateSelectedRoute();refreshResTags()}});
 $('camera-focus').onclick=focusSelected;
 
 /* ====================== camera ====================== */
@@ -596,7 +602,7 @@ function clampCamera(){
  const tg=groundHeight(controls.target.x,-controls.target.z);if(controls.target.y<tg)controls.target.y=tg;
 }
 function view(mode){
- cameraMode=mode;document.querySelectorAll('.map-tools button').forEach(b=>b.classList.toggle('active',b.id===`camera-${mode}`));
+ cameraMode=mode;document.querySelectorAll('.camera-tools button').forEach(b=>b.classList.toggle('active',b.id===`camera-${mode}`));
  if(mode==='overview'){const o=overviewPose();flyCamera(o.pos,o.target,{dur:region.on?1600:1100})}
  if(mode==='top'){const o=topPose();flyCamera(o.pos,o.target,{dur:region.on?1600:1100})}
  if(mode==='follow'){if(!selected&&state?.drones?.length){selected={kind:'drone',id:state.drones[0].id};renderSelection()}if(selected)frameEntity(selected.kind,selected.id)}
@@ -613,8 +619,16 @@ function pickGround(){
 }
 canvasEl.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];cancelFlight()});
 canvasEl.addEventListener('wheel',cancelFlight,{passive:true});
+let hoverRes=null,hoverT=0;
+const resFull=r=>r.name&&r.name!==r.id?`${r.id} · ${r.name}`:(r.agency?`${r.id} · ${r.agency}${r.kind?' '+nice(r.kind):''}`:String(r.id));
+function applyResTag(o){const u=o.userData;if(!u.tag||u.kind!=='resource')return;const full=hoverRes===o||(selected?.kind==='resource'&&selected.id===u.id),text=full?resFull(u.item||{id:u.id}):String(u.id);if(u.tagText===text)return;
+ const old=u.tag,pos=old.position.clone();o.remove(old);old.material.map.dispose();old.material.dispose();const t=label(text,RESOURCE_COLOR[u.vkind]||'#e2d4b8',5);t.position.copy(pos);t.userData.s0=t.scale.clone();t.userData.prio=full?9:3;o.add(t);u.tag=t;u.tagText=text}
+function refreshResTags(){for(const o of resourceObjects.values())applyResTag(o)}
+function setHover(o){if(hoverRes===o)return;const prev=hoverRes;hoverRes=o;if(prev)applyResTag(prev);if(o)applyResTag(o)}
+canvasEl.addEventListener('pointermove',e=>{if(e.buttons||performance.now()-hoverT<100)return;hoverT=performance.now();setPointer(e);const o=pickActor();setHover(o&&o.userData.kind==='resource'?o:null);canvasEl.style.cursor=addMode?'crosshair':(o?'pointer':'')});
+canvasEl.addEventListener('pointerleave',()=>setHover(null));
 canvasEl.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5)return;setPointer(e);if(addMode){const p=pickGround();if(p)openPopover(p,e);return}const o=pickActor();if(o)select(o.userData.kind,o.userData.id)});
-canvasEl.addEventListener('dblclick',e=>{setPointer(e);const o=pickActor();if(o){select(o.userData.kind,o.userData.id);return}const p=pickGround();if(p){cameraMode='free';document.querySelectorAll('.map-tools button').forEach(b=>b.classList.remove('active'));flyTo(p,{dist:48,elev:.3,dur:1200})}});
+canvasEl.addEventListener('dblclick',e=>{setPointer(e);const o=pickActor();if(o){select(o.userData.kind,o.userData.id);return}const p=pickGround();if(p){cameraMode='free';document.querySelectorAll('.camera-tools button').forEach(b=>b.classList.remove('active'));flyTo(p,{dist:48,elev:.3,dur:1200})}});
 
 new ResizeObserver(()=>{camera.aspect=host.clientWidth/host.clientHeight;camera.updateProjectionMatrix();renderer.setSize(host.clientWidth,host.clientHeight)}).observe(host);
 
@@ -763,6 +777,7 @@ function declutter(now){
  for(const o of resourceObjects.values())if(o.visible&&o.userData.tag)push(o.userData.tag,o,3+(selected?.id===o.userData.id?9:0));
  for(const o of droneObjects.values())if(o.visible&&o.userData.tag&&o.userData.tag.material.opacity>.03)push(o.userData.tag,o,selected?.id===o.userData.id?10:2);
  for(const o of dockObjects.values())if(o.userData.tag)push(o.userData.tag,o,4);
+ for(const g of mesh.subs.values())if(g.visible&&g.userData.tag)push(g.userData.tag,g,2);
  if(region.on){for(const s of region.lifeLabels)push(s,s,4);for(const s of region.lifeBadges)push(s,s,5);if(showWards)for(const s of region.wardLabels)push(s,s,1)}
  cands.sort((a,b)=>b.prio-a.prio);const taken=[];
  for(const c of cands){const s=c.s;s.getWorldPosition(dcVec);dcVec.project(camera);const sx=(dcVec.x*.5+.5)*w,sy=(-dcVec.y*.5+.5)*h;
@@ -824,8 +839,57 @@ function stepTraffic(now,dt,live){
  traffic.drawn=drawn;
 }
 
+/* ====================== decentralized coordination: mesh links, gateways, sub-tasks ====================== */
+const meshGroup=new THREE.Group();scene.add(meshGroup);
+const mesh={segs:null,cap:0,pairs:[],subs:new Map(),subSegs:null,subCap:0,subPairs:[],on:false};
+const SUB_COLOR={open:'#8e8e93',assigned:'#e9a21c',enroute:'#e9812a',executing:'#2d7ff0',done:'#2e9e6b',closed:'#b0b0b5'};
+const _c1=new THREE.Color('#d9534f'),_c2=new THREE.Color('#e9a21c'),_c3=new THREE.Color('#1fa59a'),_cc=new THREE.Color();
+function qualityColor(q){q=Math.max(0,Math.min(1,Number(q)||0));return q<.5?_cc.copy(_c1).lerp(_c2,q/.5):_cc.copy(_c2).lerp(_c3,(q-.5)/.5)}
+function makeSegs(cap,opacity){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(cap*6),3));g.setAttribute('color',new THREE.BufferAttribute(new Float32Array(cap*6),3));g.setDrawRange(0,0);const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity,depthTest:false,depthWrite:false}));l.frustumCulled=false;l.renderOrder=3;meshGroup.add(l);return l}
+function ensureSegs(key,capKey,need,opacity){if(mesh[key]&&mesh[capKey]>=need)return;if(mesh[key]){meshGroup.remove(mesh[key]);mesh[key].geometry.dispose();mesh[key].material.dispose()}mesh[capKey]=need+64;mesh[key]=makeSegs(mesh[capKey],opacity)}
+function subMarker(st){
+ const g=new THREE.Group(),col=SUB_COLOR[st.status]||'#8e8e93',m=new THREE.Mesh(new THREE.OctahedronGeometry(4.2),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.95,depthTest:false}));m.position.y=18;m.renderOrder=6;g.add(m);
+ const pole=new THREE.Mesh(cylinderGeo,new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.6}));pole.scale.set(.35,16,.35);pole.position.y=8;g.add(pole);
+ const ring=new THREE.Mesh(new THREE.RingGeometry(5,6.2,28).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.8,side:THREE.DoubleSide,depthTest:false}));ring.position.y=.8;ring.renderOrder=5;g.add(ring);
+ g.userData={marker:m,pole,ring,text:'',status:''};scene.add(g);return g}
+function syncMesh(){
+ const links=Array.isArray(state.mesh?.links)?state.mesh.links:[],subs=Array.isArray(state.subtasks)?state.subtasks:[];
+ mesh.on=links.length>0||subs.length>0;
+ mesh.pairs=[];for(const l of links){const a=droneObjects.get(l[0]),b=droneObjects.get(l[1]);if(a&&b)mesh.pairs.push([a,b,Number(l[2])])}
+ ensureSegs('segs','cap',mesh.pairs.length,.34);if(mesh.segs){const ca=mesh.segs.geometry.attributes.color;mesh.pairs.forEach((p,i)=>{const c=qualityColor(p[2]);ca.setXYZ(i*2,c.r,c.g,c.b);ca.setXYZ(i*2+1,c.r,c.g,c.b)});ca.needsUpdate=true}
+ const gw=new Set((state.drones||[]).filter(d=>d.coordination?.gateway).map(d=>d.id)),some=gw.size>0&&gw.size<(state.drones||[]).length;
+ for(const [id,o] of droneObjects){const on=some&&gw.has(id);let r=o.userData.gw;if(on&&!r){r=new THREE.Mesh(new THREE.RingGeometry(11,12.4,40).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:'#7c5cc4',transparent:true,opacity:.95,depthTest:false,side:THREE.DoubleSide}));r.position.y=-5;r.renderOrder=8;o.add(r);o.userData.gw=r}if(r)r.visible=on}
+ const seen=new Set();mesh.subPairs=[];
+ for(const st of subs){if(!Array.isArray(st.position))continue;seen.add(st.id);let g=mesh.subs.get(st.id);const v=vec(st.position);
+  if(!g){g=subMarker(st);mesh.subs.set(st.id,g)}g.position.set(v.x,groundHeight(v.x,-v.z),v.z);
+  const u=g.userData,text=`${nice(st.kind)} · ${st.winner||'open'}`;
+  if(u.status!==st.status){u.status=st.status;const col=SUB_COLOR[st.status]||'#8e8e93';for(const m of [u.marker,u.pole,u.ring])m.material.color.set(col);const fade=st.status==='closed'?.35:1;u.marker.material.opacity=.95*fade;u.pole.material.opacity=.6*fade;u.ring.material.opacity=.8*fade}
+  if(u.text!==text||u.statusLabel!==st.status){u.text=text;u.statusLabel=st.status;if(u.tag){g.remove(u.tag);u.tag.material.map.dispose();u.tag.material.dispose()}const tag=label(`${text} · ${nice(st.status)}`,SUB_COLOR[st.status]||'#8e8e93',5);tag.position.y=32;g.add(tag);u.tag=tag}
+  u.item=st;if(st.winner&&droneObjects.get(st.winner))mesh.subPairs.push([droneObjects.get(st.winner),g,st.status])}
+ for(const [id,g] of mesh.subs)if(!seen.has(id)){scene.remove(g);disposeGroup(g);mesh.subs.delete(id)}
+ ensureSegs('subSegs','subCap',mesh.subPairs.length,.55);
+ if(mesh.subSegs){const ca=mesh.subSegs.geometry.attributes.color;mesh.subPairs.forEach((p,i)=>{_cc.set(SUB_COLOR[p[2]]||'#8e8e93');ca.setXYZ(i*2,_cc.r,_cc.g,_cc.b);ca.setXYZ(i*2+1,_cc.r,_cc.g,_cc.b)});ca.needsUpdate=true}
+}
+function stepMesh(){
+ const show=showMesh&&mesh.on;
+ if(mesh.segs){mesh.segs.visible=show;if(show){const pa=mesh.segs.geometry.attributes.position;let n=0;for(const [a,b] of mesh.pairs){if(!a.visible||!b.visible)continue;pa.setXYZ(n*2,a.position.x,a.position.y,a.position.z);pa.setXYZ(n*2+1,b.position.x,b.position.y,b.position.z);n++}pa.needsUpdate=true;mesh.segs.geometry.setDrawRange(0,n*2)}}
+ const k=Math.max(1,Math.min(12,camDist/320));
+ for(const g of mesh.subs.values()){g.visible=show;g.scale.setScalar(k);const t=g.userData.tag;if(t){if(!t.userData.s0)t.userData.s0=t.scale.clone();t.scale.set(t.userData.s0.x/k,t.userData.s0.y/k,1)}}
+ if(mesh.subSegs){mesh.subSegs.visible=show;if(show){const pa=mesh.subSegs.geometry.attributes.position;let n=0;for(const [d,g] of mesh.subPairs){pa.setXYZ(n*2,d.position.x,d.position.y,d.position.z);pa.setXYZ(n*2+1,g.position.x,g.position.y+18*k,g.position.z);n++}pa.needsUpdate=true;mesh.subSegs.geometry.setDrawRange(0,n*2)}}
+}
+function renderMeshChip(){
+ const chip=$('mesh-chip'),m=state.mesh,mode=state.coordination?.mode;const cs=$('coord-select');if(mode&&document.activeElement!==cs)cs.value=mode;
+ if(!m||(mode!=='decentralized'&&!(m.messages_sent>0))){chip.hidden=true;return}
+ const part=Array.isArray(m.partitions)?m.partitions.length:Number(m.partitions)||0,cons=m.by_kind?.consensus??m.messages_sent??0;chip.hidden=false;
+ setHTML(chip,`<b>${cons}</b> consensus msgs &middot; <b>${m.dropped??0}</b> dropped &middot; <b>${part}</b> partition${part===1?'':'s'}`);
+}
+$('coord-select').onchange=e=>{command('set_coordination',{mode:e.target.value});e.target.blur()};
+
 /* ====================== command center timeline ====================== */
-const MSG_KIND={task:['Task','#2f80ed'],accept:['Accepted','#2e9e6b'],decline:['Declined','#d9534f'],report:['Report','#7c5cc4'],status:['Status','#6e8997'],resource_request:['Resource request','#d9822b'],ack:['Ack','#1f9d8f'],cancel:['Cancelled','#9a6b6b'],handoff:['Handoff','#2f9db8']};
+const MSG_KIND={task:['Task','#2f80ed'],accept:['Accepted','#2e9e6b'],decline:['Declined','#d9534f'],report:['Report','#7c5cc4'],status:['Status','#6e8997'],resource_request:['Resource request','#d9822b'],ack:['Ack','#1f9d8f'],cancel:['Cancelled','#9a6b6b'],handoff:['Handoff','#2f9db8'],situation_report:['Situation report','#2f80ed'],alert:['Alert','#d70015'],dispatch:['Dispatch','#e08a2e'],unit_status:['Unit status','#2e9e6b']};
+const AGENCY={ambulance:['Ambulance','#d6453d'],fire:['Fire','#e9812a'],rescue:['Rescue','#1f9d8f'],police:['Police','#455a8a'],works:['Public works','#8a6f2a']};
+const agencyOf=n=>{n=String(n||'').toLowerCase();return /ambul|^ems/.test(n)?AGENCY.ambulance:/fire/.test(n)?AGENCY.fire:/rescue/.test(n)?AGENCY.rescue:/polic/.test(n)?AGENCY.police:/public|works|engineer/.test(n)?AGENCY.works:null};
+const alertSev=m=>{const b=m.body||{};return (/life_threat|critical|high|severe/i.test(String(b.alert)+' '+b.severity)||Number(b.severity)>=4)?'bad':'warn'};
 const isCommandName=n=>/command|disruption|ops|center|centre|control|dispatch/i.test(String(n||''))&&!/^D\d/i.test(String(n||''));
 function fmtBody(m){
  let b=m.body;const parts=[];if(m.text)parts.push(String(m.text));
@@ -834,11 +898,29 @@ function fmtBody(m){
  else if(b!=null&&b!==''&&b!==m.text)parts.push(String(b));
  return parts.join(' · ');
 }
+
+function sitInner(b){
+ const p=b.people||{},inj=b.injured||{},hz=b.hazards||[],units=(b.nearby_units||[]).slice(0,4),conf=b.confidence,pct=conf==null?null:Math.round(conf*100);
+ let h=`<div class="sit-grid"><span>People</span><b>${p.estimate!=null?`~${escapeHTML(p.estimate)}${p.low!=null&&p.high!=null?` (${escapeHTML(p.low)}&ndash;${escapeHTML(p.high)})`:''}`:'&mdash;'}</b><span>Injured</span><b>${escapeHTML(inj.estimate??0)}${inj.severity&&inj.severity!=='none'?` &middot; ${escapeHTML(nice(inj.severity))}`:''}</b>`;
+ if(hz.length)h+=`<span>Hazards</span><b>${hz.map(x=>`<em class="hz ${escapeHTML(x.level)}">${escapeHTML(nice(x.kind))} ${escapeHTML(nice(x.level))}${x.trend==='rising'||x.trend==='worsening'?' &uarr;':x.trend==='falling'?' &darr;':''}</em>`).join('')}</b>`;
+ if(b.access?.best_approach)h+=`<span>Access</span><b>${escapeHTML(b.access.best_approach)}</b>`;
+ h+='</div>';
+ if(units.length)h+=`<div class="sit-units">${units.map(u=>`<div class="${u.assigned_here?'here':''}"><span>${escapeHTML(u.id)} ${escapeHTML(nice(u.kind))}${u.assigned_here?' &middot; assigned':''}${u.state&&u.state!=='available'?` &middot; ${escapeHTML(nice(u.state))}`:''}</span><i>${Math.round(u.distance_m)} m &middot; ETA ${Math.round(u.eta_s)} s</i></div>`).join('')}</div>`;
+ if(pct!=null)h+=`<div class="conf" title="Confidence ${pct}%"><i style="width:${pct}%"></i></div><div class="msg-meta"><span>confidence ${pct}%</span>${b.reason?`<span>${escapeHTML(nice(b.reason))}</span>`:''}${b.revision!=null?`<span>rev ${escapeHTML(b.revision)}</span>`:''}</div>`;
+ return h;
+}
+function bubbleHTML(m){
+ const [lab,col0]=MSG_KIND[m.kind]||[nice(m.kind),'#6e8997'],cmd=isCommandName(m.from),agent=cmd?m.to:m.from,ag=agencyOf(m.kind==='dispatch'?m.to:m.from)||agencyOf(m.to),col=ag?ag[1]:col0;
+ const attrs=`data-msg-incident="${escapeHTML(m.incident_id||'')}" data-msg-agent="${escapeHTML(agent||'')}" style="--c:${col}"`;
+ const head=(title,extra='')=>`<div class="msg-head"><b>${title}</b>${extra}<time>${clock(m.t)}</time></div>`;
+ if(m.kind==='situation_report'){const b=m.body||{};return `<button class="msg sit" ${attrs}>${head('Situation report',`<span>${escapeHTML(m.incident_id||'')}</span>`)}${sitInner(b)}</button>`}
+ if(m.kind==='alert'){const b=m.body||{},sev=alertSev(m);return `<button class="msg alert ${sev}" ${attrs}>${head(`Alert &middot; ${escapeHTML(nice(b.alert||'alert'))}`,`<span>${escapeHTML(m.incident_id||b.drone_id||'')}</span>`)}<div class="msg-text">${escapeHTML(m.text||fmtBody(m))}</div><div class="msg-meta"><span>${sev==='bad'?'urgent':'attention'}</span>${b.drone_id?`<span>${escapeHTML(b.drone_id)}</span>`:''}${b.fault?`<span>${escapeHTML(nice(b.fault))}</span>`:''}</div></button>`}
+ return `<button class="msg ${cmd?'from-cmd':'from-agent'}" ${attrs}><div class="msg-head"><b>${escapeHTML(m.from||'?')}</b><span>to ${escapeHTML(m.to||'all')}</span><time>${clock(m.t)}</time></div><div class="msg-text">${escapeHTML(fmtBody(m)||nice(m.kind))}</div><div class="msg-meta"><span class="kind">${escapeHTML(lab)}</span>${ag?`<span class="agency-tag">${escapeHTML(ag[0])}</span>`:''}${m.incident_id?`<span>${escapeHTML(m.incident_id)}</span>`:''}${m.request_id?`<span>${escapeHTML(m.request_id)}</span>`:''}</div></button>`;
+}
 let msgFilter='',msgSig='',msgOptSig='';
 function renderCommand(){
  const msgs=Array.isArray(state.messages)?state.messages:null;const list=$('msg-list'),chips=$('task-chips');if(!list)return;
- if(!msgs){setHTML(list,'<p class="muted">This server does not publish command-center messages yet.</p>');setHTML(chips,'');$('msg-count').textContent='—';return}
- $('msg-count').textContent=msgs.length;
+ if(!msgs){setHTML(list,'<p class="muted">This server does not publish command-center messages yet.</p>');setHTML(chips,'');return}
  const incs=new Set((state.incidents||[]).map(i=>i.id));for(const m of msgs)if(m.incident_id)incs.add(m.incident_id);
  const optSig=[...incs].join(',');const filter=$('msg-filter');if(optSig!==msgOptSig){msgOptSig=optSig;filter.innerHTML='<option value="">All incidents</option>'+[...incs].map(i=>`<option value="${escapeHTML(i)}">${escapeHTML(i)}</option>`).join('');filter.value=msgFilter}
  const shown=msgs.filter(m=>!msgFilter||m.incident_id===msgFilter).slice(-150);
@@ -849,8 +931,7 @@ function renderCommand(){
  setHTML(chips,chipHTML||'<span class="muted">No active tasks.</span>');
  if(sig===msgSig)return;msgSig=sig;
  const atBottom=list.scrollTop+list.clientHeight>=list.scrollHeight-30;
- const html=shown.map(m=>{const [lab,col]=MSG_KIND[m.kind]||[nice(m.kind),'#6e8997'],cmd=isCommandName(m.from),agent=cmd?m.to:m.from;
-  return `<button class="msg ${cmd?'from-cmd':'from-agent'}" data-msg-incident="${escapeHTML(m.incident_id||'')}" data-msg-agent="${escapeHTML(agent||'')}" style="--c:${col}"><div class="msg-head"><b>${escapeHTML(m.from||'?')}</b><span>to ${escapeHTML(m.to||'all')}</span><time>${clock(m.t)}</time></div><div class="msg-text">${escapeHTML(fmtBody(m)||nice(m.kind))}</div><div class="msg-meta"><span class="kind">${escapeHTML(lab)}</span>${m.incident_id?`<span>${escapeHTML(m.incident_id)}</span>`:''}${m.request_id?`<span>${escapeHTML(m.request_id)}</span>`:''}</div></button>`}).join('');
+ const html=shown.map(bubbleHTML).join('');
  setHTML(list,html||'<p class="muted">No messages yet.</p>');if(atBottom)list.scrollTop=list.scrollHeight;
 }
 $('msg-filter').onchange=e=>{msgFilter=e.target.value;msgSig='';if(state)renderCommand()};
@@ -887,30 +968,32 @@ function renderScenarioOptions(current){
  if(current)sel.value=current;
 }
 
-window.__ops={region,proc,traffic,get trafficCount(){return traffic.count},get trafficDrawn(){return traffic.drawn||0},resourceObjects,incidentObjects,select,flyTo,get camDist(){return camDist},renderer,THREE,get world(){return worldData},peopleObjects,searchGroup,camera,controls,groundHeight,get state(){return state},get selected(){return selected},get flying(){return !!flight},droneObjects,signalObjects,dockObjects,footObjects,routeLines};
+window.__ops={meshState:mesh,subtaskObjects:mesh.subs,region,proc,traffic,get trafficCount(){return traffic.count},get trafficDrawn(){return traffic.drawn||0},resourceObjects,incidentObjects,select,flyTo,get camDist(){return camDist},renderer,THREE,get world(){return worldData},peopleObjects,searchGroup,camera,controls,groundHeight,get state(){return state},get selected(){return selected},get flying(){return !!flight},droneObjects,signalObjects,dockObjects,footObjects,routeLines};
 
 /* ====================== live operations log (virtualised) ====================== */
-const LOG={rows:[],keys:new Set(),textKeys:new Set(),filtered:[],filter:'all',q:'',live:true,ROW:46,open:true,w:380,ver:0,drawn:'',unseen:0,CAP:6000,dirty:false};
+const LOG={rows:[],keys:new Set(),textKeys:new Set(),filtered:[],filter:'all',q:'',live:true,ROW:50,open:true,w:340,ver:0,drawn:'',unseen:0,CAP:6000,dirty:false,expanded:new Set(),hmap:new Map(),off:[0],total:0,xv:0};
 const LOG_GLYPH={task:['→','k-blue'],accept:['✓','k-ok'],decline:['×','k-bad'],report:['·','k-mute'],status:['·','k-mute'],resource_request:['+','k-warn'],ack:['✓','k-ok'],cancel:['×','k-mute'],handoff:['⇄','k-blue'],decision:['◆','k-blue'],
- incident:['!','k-warn'],sos:['!','k-bad'],briefing:['i','k-blue'],dispatch:['↗','k-blue'],arrival:['●','k-ok'],recall:['↩','k-mute'],supply_request:['+','k-warn'],fault:['!','k-bad'],crash:['!','k-bad'],flood_routes:['≈','k-mute']};
-const LOG_ALERT=/fault|crash|fail|declin|link|battery|lost|sos|blocked|critical|unavailable|collision|emergency|incident|degraded|closed/i,LOG_CMD=/command|disruption|control|dispatch/i;
+ incident:['!','k-warn'],sos:['!','k-bad'],briefing:['i','k-blue'],dispatch:['↗','k-blue'],arrival:['●','k-ok'],recall:['↩','k-mute'],supply_request:['+','k-warn'],fault:['!','k-bad'],crash:['!','k-bad'],flood_routes:['≈','k-mute'],situation_report:['≡','k-blue'],alert:['!','k-bad'],unit_status:['●','k-ok'],dispatch_order:['↗','k-blue']};
+const LOG_ALERT=/alert|fault|crash|fail|declin|link|battery|lost|sos|blocked|critical|unavailable|collision|emergency|incident|degraded|closed/i,LOG_CMD=/command|disruption|control|dispatch/i;
 function logTags(r,resIds){
  const t=new Set(),agent=String(r.agent||r.actor||''),text=r.text||'';
  if(r.src==='decision')t.add('decisions');
- if(r.src==='message'||LOG_CMD.test(String(r.actor))||['task','ack','cancel','handoff','briefing','dispatch'].includes(r.kind))t.add('command');
+ if(r.src==='message'||LOG_CMD.test(String(r.actor))||['task','ack','cancel','handoff','briefing','dispatch','dispatch_order','situation_report','unit_status'].includes(r.kind))t.add('command');
+ if(['situation_report','report'].includes(r.kind))t.add('reports');
  if(LOG_ALERT.test(r.kind)||(r.kind!=='accept'&&/fault|crash|declin|link loss|low battery|sos|failed/i.test(text)))t.add('alerts');
  if(/^D\d+/i.test(agent)||/^D\d+\b/.test(text)||r.src==='decision'&&/^D\d+/i.test(String(r.agent||''))||r.from_type==='drone')t.add('swarm');
- if(resIds.has(agent)||/\b(PC-[A-Z]+-?\d*|R\d{2}|ambulance|fire (engine|tender)|rescue team|boat|JCB|tanker)\b/i.test(text)||['arrival','dispatch','handoff'].includes(r.kind)&&!/^D\d+/i.test(agent))t.add('agencies');
+ if(resIds.has(agent)||/_service|public_works/.test(agent)||/_service|public_works/.test(String(r.actor))||/\b(PC-[A-Z]+-?\d*|R\d{2}|ambulance|fire (engine|tender)|rescue team|boat|JCB|tanker)\b/i.test(text)||['arrival','dispatch','handoff'].includes(r.kind)&&!/^D\d+/i.test(agent))t.add('agencies');
  if(r.src==='message'&&!t.has('swarm')&&/swarm|^D\d+/i.test(String(r.meta||'')))t.add('swarm');
  return t;
 }
 function logReset(){LOG.rows=[];LOG.keys.clear();LOG.textKeys.clear();LOG.filtered=[];LOG.ver++;LOG.unseen=0;LOG.live=true;LOG.dirty=true}
 function ingestLog(st){
  const out=[],resIds=new Set((st.resources||[]).map(r=>r.id));
- const add=(src,id,r)=>{const key=src+':'+id;if(LOG.keys.has(key))return;LOG.keys.add(key);const tk=Math.round(r.t||0)+'|'+(r.text||'');if(src!=='m'&&src!=='d'&&LOG.textKeys.has(tk))return;LOG.textKeys.add(tk);r.src=src==='e'?'event':src==='s'?'signal':src==='m'?'message':'decision';r.tags=null;out.push(r)};
- for(const e of st.events||[])add('e',e.id??`${e.time}|${e.message}`,{t:e.time||0,kind:e.kind||'event',actor:e.drone_id||e.resource_id||e.actor||'',text:e.message||'',incident:e.incident_id,agent:e.drone_id||e.resource_id||''});
+ const add=(src,id,r)=>{const key=src+':'+id;if(LOG.keys.has(key))return;LOG.keys.add(key);const tk=Math.round(r.t||0)+'|'+(r.text||'');if(src!=='m'&&src!=='d'&&LOG.textKeys.has(tk))return;LOG.textKeys.add(tk);r.k=key;r.src=src==='e'?'event':src==='s'?'signal':src==='m'?'message':'decision';r.tags=null;out.push(r)};
+ const dispIds=new Set((st.messages||[]).filter(m=>m.kind==='dispatch').map(m=>m.request_id));
+ for(const e of st.events||[]){if(e.kind==='dispatch_order'&&dispIds.has(e.data?.request_id))continue;add('e',e.id??`${e.time}|${e.message}`,{t:e.time||0,kind:e.kind||'event',actor:e.drone_id||e.resource_id||e.actor||'',text:e.message||'',incident:e.incident_id,agent:e.drone_id||e.resource_id||''})}
  for(const s of st.signals||[])if(s?.id!=null)add('s',s.id,{t:s.t||0,kind:s.kind||'signal',actor:s.from_id||s.from_type||'',text:s.text||nice(s.kind),incident:s.incident_id,agent:s.from_id,from_type:s.from_type});
- for(const m of st.messages||[]){if(m?.id==null)continue;const cmd=isCommandName(m.from);add('m',m.id,{t:m.t||0,kind:m.kind||'status',actor:m.from||'',text:m.text||fmtBody(m)||nice(m.kind),meta:`${m.from||'?'} → ${m.to||'all'}`,incident:m.incident_id,agent:cmd?m.to:m.from})}
+ for(const m of st.messages||[]){if(m?.id==null)continue;const cmd=isCommandName(m.from);add('m',m.id,{t:m.t||0,kind:m.kind||'status',actor:m.from||'',text:m.text||fmtBody(m)||nice(m.kind),meta:`${m.from||'?'} → ${m.to||'all'}`,incident:m.incident_id,agent:cmd?m.to:m.from,sev:m.kind==='alert'?alertSev(m):undefined})}
  for(const d of st.decisions||[]){const id=d.id??`${d.t}|${d.agent}|${d.decision}|${d.incident_id||''}`,why=d.why||d.reason||d.summary||'';add('d',id,{t:d.t||0,kind:'decision',actor:d.drone_id||d.agent||'swarm',agent:d.drone_id||d.agent,text:nice(d.decision||d.kind)+(d.incident_id?` for ${d.incident_id}`:''),why,incident:d.incident_id,options:d.options,routine:/^(search|patrol|hold|idle|continue|charge|return|scan|wait)/i.test(String(d.decision||d.kind||''))})}
  if(!out.length)return;
  out.sort((a,b)=>(a.t||0)-(b.t||0));
@@ -919,16 +1002,21 @@ function ingestLog(st){
  LOG.ver++;LOG.dirty=true;if(!LOG.live)LOG.unseen+=out.length;
 }
 function logRefilter(){const f=LOG.filter,q=LOG.q.trim().toLowerCase();LOG.filtered=LOG.rows.filter(r=>(f==='all'?!r.routine:r.tags.has(f))&&(!q||(r.text+' '+(r.actor||'')+' '+(r.why||'')+' '+(r.incident||'')+' '+r.kind).toLowerCase().includes(q)))}
+const logEst=r=>{const cpl=Math.max(20,Math.floor((LOG.w-110)/6.2));return 16+Math.ceil((r.text||'').length/cpl)*16+30+28};
+function logLayout(){const f=LOG.filtered,off=new Array(f.length+1);let y=0;for(let i=0;i<f.length;i++){off[i]=y;const k=f[i].k;y+=LOG.expanded.has(k)?(LOG.hmap.get(k)||logEst(f[i])):LOG.ROW}off[f.length]=y;LOG.off=off;LOG.total=y}
+function logIndexAt(y){let lo=0,hi=LOG.filtered.length;while(lo<hi){const mid=(lo+hi)>>1;if(LOG.off[mid+1]<=y)lo=mid+1;else hi=mid}return lo}
 function renderLog(force){
- const panel=$('oplog');if(!LOG.open||!panel)return;const sc=$('oplog-scroll');
- if(LOG.dirty||force){logRefilter();LOG.dirty=false;$('oplog-count').textContent=LOG.filtered.length;$('oplog-spacer').style.height=LOG.filtered.length*LOG.ROW+'px';if(LOG.live)sc.scrollTop=sc.scrollHeight}
- const n=LOG.filtered.length,H=LOG.ROW,top=sc.scrollTop,vh=sc.clientHeight||400,a=Math.max(0,Math.floor(top/H)-4),b=Math.min(n,Math.ceil((top+vh)/H)+4),sig=a+':'+b+':'+LOG.ver+':'+LOG.filter+':'+LOG.q+':'+n;
+ const panel=$('oplog');if(!LOG.open||!panel||$('rpanel-log').hidden)return;const sc=$('oplog-scroll');
+ if(LOG.dirty||force){logRefilter();logLayout();LOG.dirty=false;$('oplog-count').textContent=LOG.filtered.length;$('oplog-spacer').style.height=LOG.total+'px';if(LOG.live)sc.scrollTop=sc.scrollHeight}
+ const n=LOG.filtered.length,top=sc.scrollTop,vh=sc.clientHeight||400,a=Math.max(0,logIndexAt(top)-3),b=Math.min(n,logIndexAt(top+vh)+4),sig=a+':'+b+':'+LOG.ver+':'+LOG.filter+':'+LOG.q+':'+n+':'+LOG.xv+':'+LOG.total;
  if(sig===LOG.drawn&&!force)return;LOG.drawn=sig;
  let html='';
  if(!n)html=`<div class="logempty">${LOG.q||LOG.filter!=='all'?'Nothing matches this filter yet.':'Waiting for activity…'}</div>`;
- for(let i=a;i<b;i++){const r=LOG.filtered[i],g=LOG_GLYPH[r.kind]||['·','k-mute'],meta=[r.actor,r.meta&&r.meta!==r.actor?r.meta:'',nice(r.kind),r.incident,orchIncidents.has(r.incident)?'via DisruptionOps':''].filter(Boolean).filter((v,j,arr)=>arr.indexOf(v)===j).join(' · ');
-  html+=`<div class="logrow" role="button" tabindex="0" data-i="${i}" style="top:${i*H}px"><time>${clock(r.t)}</time><i class="glyph ${g[1]}">${g[0]}</i><span class="logmain"><span class="logtext" title="${escapeHTML(r.text)}">${escapeHTML(r.text)}</span><span class="logmeta">${escapeHTML(r.why?`why: ${r.why}`:meta)}</span></span></div>`}
+ for(let i=a;i<b;i++){const r=LOG.filtered[i],g=r.kind==='alert'&&r.sev==='warn'?['!','k-warn']:(LOG_GLYPH[r.kind]||['·','k-mute']),open=LOG.expanded.has(r.k),meta=[r.actor,r.meta&&r.meta!==r.actor?r.meta:'',nice(r.kind),r.incident,orchIncidents.has(r.incident)?'via DisruptionOps':''].filter(Boolean).filter((v,j,arr)=>arr.indexOf(v)===j).join(' · ');
+  html+=`<div class="logrow${open?' open':''}${r.sev?' sev-'+r.sev:''}" role="button" tabindex="0" aria-expanded="${open}" data-i="${i}" style="top:${LOG.off[i]}px${open?'':';height:'+LOG.ROW+'px'}"><time>${clock(r.t)}</time><i class="glyph ${g[1]}">${g[0]}</i><span class="logmain"><span class="logtext">${escapeHTML(r.text)}</span><span class="logmeta">${escapeHTML(r.why?`why: ${r.why}`:meta)}</span>${open&&(r.incident||r.agent)?`<button class="logmore" data-focus-row="${i}">Show on map</button>`:''}</span></div>`}
  $('oplog-rows').innerHTML=html;
+ let changed=false;for(const el of $('oplog-rows').querySelectorAll('.logrow.open')){const r=LOG.filtered[+el.dataset.i];if(!r)continue;const h=Math.ceil(el.offsetHeight);if(Math.abs((LOG.hmap.get(r.k)||0)-h)>1){LOG.hmap.set(r.k,h);changed=true}}
+ if(changed)requestAnimationFrame(()=>{LOG.xv++;renderLog(true)});
  const jump=$('oplog-jump');jump.hidden=LOG.live;jump.textContent=LOG.unseen?`Jump to live · ${LOG.unseen} new`:'Jump to live';$('oplog-live').classList.toggle('paused',!LOG.live);$('oplog-live').title=LOG.live?'Following live':'Paused - scroll to the end to follow';
 }
 {
@@ -937,17 +1025,18 @@ function renderLog(force){
  $('oplog-jump').onclick=()=>{LOG.live=true;LOG.unseen=0;sc.scrollTop=sc.scrollHeight;LOG.drawn='';renderLog(true)};
  $('oplog-filters').addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;LOG.filter=b.dataset.f;for(const x of $('oplog-filters').children)x.classList.toggle('active',x===b);LOG.live=true;LOG.dirty=true;renderLog(true)});
  let qt=0;$('oplog-search').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{LOG.q=e.target.value;LOG.dirty=true;renderLog(true)},120)});
- const act=el=>{const r=LOG.filtered[Number(el.dataset.i)];if(r)focusMessage(r.incident,r.agent)};
- $('oplog-rows').addEventListener('click',e=>{const el=e.target.closest('.logrow');if(el)act(el)});
- $('oplog-rows').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const el=e.target.closest('.logrow');if(el){e.preventDefault();act(el)}}});
+ const act=i=>{const r=LOG.filtered[Number(i)];if(r)focusMessage(r.incident,r.agent)};
+ const toggleRow=el=>{const r=LOG.filtered[Number(el.dataset.i)];if(!r)return;if(LOG.expanded.has(r.k))LOG.expanded.delete(r.k);else LOG.expanded.add(r.k);LOG.xv++;LOG.drawn='';renderLog(true)};
+ $('oplog-rows').addEventListener('click',e=>{const f=e.target.closest('[data-focus-row]');if(f){act(f.dataset.focusRow);return}const el=e.target.closest('.logrow');if(el)toggleRow(el)});
+ $('oplog-rows').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const el=e.target.closest('.logrow');if(el){e.preventDefault();toggleRow(el)}}});
  const setOpen=on=>{LOG.open=on;$('oplog').hidden=!on;viewport.classList.toggle('log-closed',!on);viewport.style.setProperty('--log-offset',on?(LOG.w+16)+'px':'0px');const t=$('toggle-log');t.classList.toggle('active',on);t.setAttribute('aria-pressed',String(on));try{localStorage.setItem('ops-log-open',on?'1':'0')}catch{}if(on){LOG.drawn='';LOG.dirty=true;requestAnimationFrame(()=>renderLog(true))}};
- const setWidth=w=>{LOG.w=Math.max(300,Math.min(Math.min(720,viewport.clientWidth-340),w));viewport.style.setProperty('--log-w',LOG.w+'px');if(LOG.open)viewport.style.setProperty('--log-offset',(LOG.w+16)+'px')};
+ const setWidth=w=>{LOG.w=Math.max(300,Math.min(Math.min(720,viewport.clientWidth-340),w));LOG.hmap.clear();viewport.style.setProperty('--log-w',LOG.w+'px');if(LOG.open)viewport.style.setProperty('--log-offset',(LOG.w+16)+'px')};
  $('toggle-log').onclick=()=>setOpen(!LOG.open);$('oplog-close').onclick=()=>setOpen(false);$('oplog-open').onclick=()=>setOpen(true);
  const rz=$('oplog-resize');rz.addEventListener('pointerdown',e=>{rz.setPointerCapture(e.pointerId);rz.classList.add('drag');viewport.style.setProperty('--ease','linear')});
  rz.addEventListener('pointermove',e=>{if(!rz.classList.contains('drag'))return;setWidth(viewport.getBoundingClientRect().right-e.clientX-16);LOG.drawn=''});
- rz.addEventListener('pointerup',e=>{rz.classList.remove('drag');viewport.style.removeProperty('--ease');try{localStorage.setItem('ops-log-w',String(LOG.w))}catch{}kick()});
+ rz.addEventListener('pointerup',e=>{rz.classList.remove('drag');viewport.style.removeProperty('--ease');try{localStorage.setItem('ops-log-w2',String(LOG.w))}catch{}kick()});
  rz.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'){setWidth(LOG.w+24);e.preventDefault()}if(e.key==='ArrowRight'){setWidth(LOG.w-24);e.preventDefault()}});
- let w=380,open=innerWidth>=1200;try{w=Number(localStorage.getItem('ops-log-w'))||380;const o=localStorage.getItem('ops-log-open');if(o!=null)open=o==='1'}catch{}
+ let w=340,open=innerWidth>=1200;try{w=Number(localStorage.getItem('ops-log-w2'))||340;const o=localStorage.getItem('ops-log-open');if(o!=null)open=o==='1'}catch{}
  setWidth(w);setOpen(open);new ResizeObserver(kick).observe(sc);
  window.__log=LOG;
 }
@@ -960,7 +1049,7 @@ let previous=performance.now(),lastLogDraw=0;
 function animate(now){
  requestAnimationFrame(animate);const dt=Math.min((now-previous)/1000,.05);previous=now;const live=connected&&!state?.paused;
  if(waterMaterial&&live)waterMaterial.uniforms.time.value+=dt;
- stepRegion(now,dt);stepActors(now,dt,live);stepTraffic(now,dt,live);stepIncidentFX(now,live,dt);stepFootprints(dt);stepRouteAnchors();stepSelectedFX();stepSignals(now);stepPulses(now);stepPeople(now,dt);
+ stepRegion(now,dt);stepActors(now,dt,live);stepTraffic(now,dt,live);stepIncidentFX(now,live,dt);stepFootprints(dt);stepRouteAnchors();stepSelectedFX();stepSignals(now);stepPulses(now);stepPeople(now,dt);stepMesh();
  stepFlight(now);
  if(cameraMode==='follow'&&selected&&!flight){const o=droneObjects.get(selected.id)||resourceObjects.get(selected.id);if(o){const delta=o.position.clone().sub(controls.target);controls.target.lerp(o.position,.07);camera.position.addScaledVector(delta,.07)}}
  controls.update();clampCamera();
@@ -971,3 +1060,15 @@ function animate(now){
 }
 
 setConnection(false);connect();requestAnimationFrame(animate);
+
+/* ====================== layers popover ====================== */
+{const btn=$('layers-btn'),pop=$('layers-pop');const set=on=>{pop.hidden=!on;btn.setAttribute('aria-expanded',String(on))};
+ btn.onclick=e=>{e.stopPropagation();set(pop.hidden)};
+ document.addEventListener('click',e=>{if(!pop.hidden&&!e.target.closest('#layers-pop')&&e.target!==btn)set(false)});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!pop.hidden){set(false);btn.focus()}});}
+
+/* ====================== right panel tabs (Live log | Command) ====================== */
+{const tabs=[...document.querySelectorAll('[data-rtab]')];
+ const setR=(name,focus)=>{for(const b of tabs){const on=b.dataset.rtab===name;b.classList.toggle('active',on);b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;if(on&&focus)b.focus()}$('rpanel-log').hidden=name!=='log';$('panel-command').hidden=name!=='command';if(name==='log'){LOG.drawn='';LOG.dirty=true}else{msgSig='';if(state)renderCommand();const ml=$('msg-list');ml.scrollTop=ml.scrollHeight}try{localStorage.setItem('ops-rtab',name)}catch{}};
+ tabs.forEach(b=>{b.addEventListener('click',()=>setR(b.dataset.rtab));b.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();setR(tabs[(tabs.indexOf(b)+1)%tabs.length].dataset.rtab,true)}})});
+ window.__setRTab=setR;let last='log';try{last=localStorage.getItem('ops-rtab')||'log'}catch{}setR(last==='command'?'command':'log');}
