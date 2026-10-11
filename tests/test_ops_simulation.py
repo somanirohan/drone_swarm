@@ -115,8 +115,9 @@ class OperationsTests(unittest.TestCase):
             if resource["incident_id"]==incident["id"]:
                 resource.update(state="busy",incident_id=None,route=[],free_at=None)
         incident["resource_ids"]=[]
-        sim._allocate()
-        self.assertFalse(incident["resource_ids"])
+        sim.bus.post("command_center","rescue_service","dispatch","Dispatch rescue",incident["id"],"T-FREE",{"dispatch_id":"T-FREE","kind":"rescue","qty":1})
+        sim.nodes.pump()
+        self.assertFalse(incident["resource_ids"],"no unit is free, the agency node keeps the order open")
         available=next(r for r in sim.resources if r["kind"]=="rescue" and r["state"]=="busy")
         self.assertTrue(sim.command("release_resource",{"resource_id":available["id"]})["ok"])
         self.assertEqual(available["incident_id"],incident["id"])
@@ -493,7 +494,7 @@ class AgencyRequestTests(unittest.TestCase):
         metrics=sim.snapshot()["metrics"]["agency"]
         self.assertEqual((metrics["requests_received"],metrics["accepted"],metrics["declined"]),(2,1,1))
         statuses=[e.get("status") for e in sim.events]
-        self.assertIn("accepted",statuses);self.assertIn("declined",statuses);self.assertIn("resource_request",statuses)
+        self.assertIn("accepted",statuses);self.assertIn("declined",statuses);self.assertIn("dispatch_ordered",statuses)
 
     def test_chain_accept_assess_request_resources_handover_complete(self):
         sim=OperationsSimulation(fleet_size=10)
@@ -507,7 +508,7 @@ class AgencyRequestTests(unittest.TestCase):
         self.assertIn(incident["first_on_scene"],("drone","ground"))
         self.assertEqual(incident["evacuated_people"],5,"capacity-2 ambulances must not double count")
         statuses=[e.get("status") for e in sim.events if e.get("incident_id")==incident["id"]]
-        for expected in ("accepted","launched","resource_request","ground_arrived","handed_over","completed"):
+        for expected in ("accepted","launched","dispatch_ordered","ground_arrived","handed_over","completed"):
             self.assertIn(expected,statuses)
         if incident["first_on_scene"]=="drone":
             self.assertIn("on_scene",statuses);self.assertIn("briefing",statuses)

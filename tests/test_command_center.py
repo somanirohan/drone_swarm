@@ -50,7 +50,7 @@ class CommandCenterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(totals['errors'], 0)
         accepted = [t for t in summary['tasks'].values() if t['accepted']]
         statuses = {h['status'] for t in accepted for h in t['history']}
-        self.assertTrue({'accepted', 'launched', 'resource_request', 'ground_arrived'} <= statuses, statuses)
+        self.assertTrue({'accepted', 'launched', 'dispatch_ordered', 'ground_arrived'} <= statuses, statuses)
         # every swarm resource request was answered by a committed unit
         self.assertTrue(all(rr['units'] for rr in summary['resource_requests'].values()))
         timeline = json.loads((Path(self.folder.name) / 'timeline.json').read_text(encoding='utf8'))

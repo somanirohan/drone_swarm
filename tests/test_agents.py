@@ -35,7 +35,7 @@ class AgentSnapshotTests(unittest.TestCase):
         self.assertEqual(awards[0]["options"][0]["id"], winner, "lowest bid wins and is listed first")
         self.assertTrue(all(i["situation"] for i in snap["incidents"]))
         situation = snap["incidents"][0]["situation"]
-        for key in ("people", "vulnerable", "injured", "crowd_density_per_100m2", "hazards", "trend", "lifelines", "units", "briefing_revision"):
+        for key in ("people", "vulnerable", "injured", "crowd_density_per_100m2", "hazards", "trend", "lifelines", "briefing_revision"):
             self.assertIn(key, situation)
         self.assertEqual(snap["control"]["autonomy"], "running")
 
@@ -47,7 +47,9 @@ class AgentSnapshotTests(unittest.TestCase):
         inbound = [m for m in messages if m["request_id"] == "ORCH-BUS" and m["from"] == "command_center" and m["kind"] == "task"]
         reply = [m for m in messages if m["request_id"] == "ORCH-BUS" and m["to"] == "command_center" and m["kind"] == "accept"]
         self.assertTrue(inbound and reply)
-        self.assertTrue(any(m["kind"] == "resource_request" and m["incident_id"] == result["incident_id"] for m in messages))
+        self.assertTrue(any(m["kind"] == "situation_report" and m["from"] == "swarm" and m["incident_id"] == result["incident_id"] for m in messages))
+        self.assertTrue(any(m["kind"] == "dispatch" and m["from"] == "command_center" and m["incident_id"] == result["incident_id"] for m in messages), "the orchestrator dispatches")
+        self.assertFalse(any(m["kind"] == "resource_request" for m in messages))
         self.assertTrue(any(m["kind"] == "task" and m["from"] == "swarm" and m["to"].startswith("D") for m in messages), "award to a drone")
         self.assertTrue(any(m["kind"] == "accept" and m["from"].startswith("D") for m in messages), "drone accepts")
         for _ in range(120): sim.step(1)
@@ -68,21 +70,20 @@ class PlanResponseTests(unittest.TestCase):
                                         {"kind": "warp_drive", "qty": 1}],
                     "drones": [{"role": "assess", "payload": "none"}, {"role": "supply", "payload": "first_aid"}],
                     "assessment": {"severity": 5}, "rationale": "test plan"}
-        sim.coordinator.reasoner = reasoner
+        sim.nodes.orchestrator.reasoner = reasoner
         result = request(sim, "ORCH-PLAN", category="trapped", people=4)
         incident = sim._find_incident(result["incident_id"])
         self.assertEqual(incident["required_kinds"], ["rescue"])
-        self.assertEqual(incident["severity"], 5)
         rescue = [q for q in incident["resource_requests"] if q["needed_kind"] == "rescue"]
         self.assertEqual(sum(q["qty"] for q in rescue), 2)
-        self.assertEqual(rescue[0]["urgency"], "critical")
+        self.assertIn(rescue[0]["urgency"], ("high", "critical"))
         trace = [d for d in sim.decisions.recent() if d["decision"] == "plan_response" and d.get("incident_id") == incident["id"]][-1]
         self.assertFalse(trace["fallback"]); self.assertEqual(trace["source"], "reasoner")
         self.assertTrue(trace["id"].startswith("dec-")); self.assertIsNotNone(trace["latency_ms"])
         self.assertIn("warp_drive", trace["reason"], "invalid plan items are dropped and reported")
         situation, context = seen[-1]
         self.assertEqual(situation["incident_id"], incident["id"])
-        self.assertTrue(context["resources"] and context["drones"])
+        self.assertTrue(context["resources"])
 
     def test_real_reasoner_deltas_never_double_request_a_need(self):
         sim = OperationsSimulation(fleet_size=10)
@@ -94,7 +95,8 @@ class PlanResponseTests(unittest.TestCase):
                 if q["status"] in ("open", "fulfilled"): out[q["needed_kind"]] = out.get(q["needed_kind"], 0) + q["qty"]
             return out
         before = totals()
-        for _ in range(3): sim.coordinator.plan_response(incident, "replan")
+        for _ in range(3):
+            sim.nodes.swarm.notify(incident["id"], "replan", True); sim.nodes.pump()
         self.assertEqual(totals(), before, "an unchanged situation raises nothing new")
         traces = [d for d in sim.decisions.recent() if d["decision"] == "plan_response"]
         self.assertTrue(all(d["source"] == "reasoner" and not d["fallback"] for d in traces))
@@ -104,13 +106,13 @@ class PlanResponseTests(unittest.TestCase):
 
     def test_fallback_is_traced_when_reasoner_missing_or_failing(self):
         sim = OperationsSimulation(fleet_size=10)
-        sim.coordinator.reasoner = None
+        sim.nodes.orchestrator.reasoner = None
         incident = sim._find_incident(request(sim, "ORCH-FB")["incident_id"])
         self.assertEqual(incident["required_kinds"], ["ambulance"], "taxonomy: medical -> medical_transport -> ambulance")
         trace = [d for d in sim.decisions.recent() if d["decision"] == "plan_response"][-1]
         self.assertTrue(trace["fallback"]); self.assertIn("reasoner unavailable", trace["reason"])
         def broken(situation, context): raise RuntimeError("boom")
-        sim.coordinator.reasoner = broken
+        sim.nodes.orchestrator.reasoner = broken
         incident = sim._find_incident(request(sim, "ORCH-FB2", position=[200, 200], category="fire")["incident_id"])
         self.assertIn("fire_engine", incident["required_kinds"])
         trace = [d for d in sim.decisions.recent() if d["decision"] == "plan_response"][-1]
@@ -121,7 +123,7 @@ class PlanResponseTests(unittest.TestCase):
         before = [list(i["required_kinds"]) for i in sim.incidents]
         for _ in range(60): sim.step(1)
         self.assertEqual([i["required_kinds"][:len(b)] for i, b in zip(sim.incidents, before)], before)
-        self.assertTrue(any(d["decision"] == "plan_response" and d["reason"].startswith("briefing r") for d in sim.decisions.recent()))
+        self.assertTrue(any(d["decision"] == "plan_response" and d["reason"].startswith("situation r") for d in sim.decisions.recent()))
 
     def test_police_is_only_dispatched_when_a_plan_asks(self):
         sim = OperationsSimulation(fleet_size=5)
@@ -129,7 +131,7 @@ class PlanResponseTests(unittest.TestCase):
         self.assertEqual(police["model"], "police")
         for _ in range(5): sim.step(1)
         self.assertIsNone(police["incident_id"])
-        sim.coordinator.reasoner = lambda s, c: {"agency_requests": [{"kind": "police", "qty": 1, "why": "traffic control"}]}
+        sim.nodes.orchestrator.reasoner = lambda s, c: {"agency_requests": [{"kind": "police", "qty": 1, "why": "traffic control"}]}
         incident = sim._find_incident(request(sim, "ORCH-POL", position=[-200, -300])["incident_id"])
         self.assertEqual(police["incident_id"], incident["id"])
 

@@ -27,7 +27,8 @@ It sends real DisruptionOps-style reports (Ravet family on a terrace, elderly co
 ```
 [DisruptionOps -> swarm] #3 agency_request: "Fire at a chemical unit in MIDC, strong gas smell spreading"
   -> swarm: ACCEPTED incident=I005 eta=18.1 drones=['D10']
-  [resource_request] Swarm requests 3x fire_engine for I005 (fire-fighting work: ~2.6 (+0.1 margin); covers 5.2 at effectiveness 1.0, ETA 3 min)
+  SITUATION r1 I005: 6 people (about 3-9) at chemical unit fire; fire high; PC-FIRE-01 fire_engine 910 m away, available
+  DISPATCH command_center -> fire_service: Dispatch 3x fire_engine to I005: fire-fighting work (orchestrator plan)
   [ground_dispatch] PC-FIRE-01 (fire_engine) dispatched concurrently via a valid road route, ETA 196 s
 ```
 Keep the browser open next to it and watch the same events on the map and in the live log. Useful flags: `--seconds 300`, `--interval 10`, `--verbose` (every event), `--watch-only` (no token).
@@ -66,7 +67,7 @@ The swarm launches exactly what you assigned, drives those units on real roads, 
 - `control` `{autonomy:"paused"|"running", reason}`: emergency stop (no new launches)
 
 ### 4c. What to read back from each snapshot
-- `incidents[]`: `status`, `first_on_scene` (drone or ground), `resource_requests[]` (what the swarm asked for and why), `assigned_drones`, `assigned_units`, `control_mode`
+- `incidents[]`: `status`, `first_on_scene` (drone or ground), `resource_requests[]` (the orchestrator's dispatch orders and why; the swarm itself only sends `situation_report` and `alert` messages in `messages`), `assigned_drones`, `assigned_units`, `control_mode`
 - `resources[]`: ground units: `id` (e.g. `PC-AMB-06`), `agency`, `state` (`available|enroute|on_scene|evacuating`), `eta`, `route`
 - `drones[]`: `position`, `battery`, `activity`, `route_kind` (`mission|sweep|return`), `last_decision`
 - `messages[]`: command centre ↔ swarm conversation; `decisions[]`: every decision with `why`; `signals[]`: SOS/briefing/dispatch clouds; `metrics.agency`: scorecard

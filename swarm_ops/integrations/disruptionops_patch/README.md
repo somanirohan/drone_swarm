@@ -1,3 +1,5 @@
+> **Recommended path:** use the integration kit, `docs/INTEGRATION-KIT.md` and the drop-in client `swarm_ops/integrations/client/swarm_client.py`. The patch below is the older bridge-based approach.
+
 # DisruptionOps patch proposal (for upstream f7ca6d8, migrations 001-038)
 
 Nothing here is applied to DisruptionOps. Copy the files into a DisruptionOps checkout when you want them.

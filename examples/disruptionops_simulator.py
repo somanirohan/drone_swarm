@@ -3,7 +3,8 @@
 DisruptionOps is the orchestrator; the swarm is an independent agency. This script plays the
 orchestrator: it sends rescue requests (`agency_request`) shaped like DisruptionOps reports and
 prints how the swarm reacts: accept/decline with a reason, drones launched, briefings, the
-agencies the swarm asks for (`resource_request`), handoffs and completions.
+situation reports and alerts the swarm sends (it never asks for units), the dispatches the orchestrator
+makes to the agency nodes, unit status, handoffs and completions.
 
 Only dependency:  pip install websockets
 Usage:
@@ -43,7 +44,7 @@ REPORTS = [
     {"category": "shelter_full", "text": "S B Patil school shelter full, more families arriving",
      "people": 40, "vulnerable": ["family", "children"], "callers": 1},
 ]
-STATUS_WORDS = ("accept", "declin", "launch", "brief", "resource_request", "request", "dispatch", "arriv",
+STATUS_WORDS = ("accept", "declin", "launch", "brief", "dispatch_order", "request", "dispatch", "arriv",
                 "handoff", "handed", "supply", "resolved", "complet", "recall", "retask")
 
 
@@ -111,6 +112,7 @@ async def run(args):
               f"world={(state.get('world') or {}).get('id', 'pune-district')}")
         for e in state.get("events", []):
             seen_events.add(e["id"])
+        seen_messages = {m["id"] for m in state.get("messages", [])}
         start, n = time.monotonic(), 0
         next_send = start
         while time.monotonic() - start < args.seconds:
@@ -127,6 +129,19 @@ async def run(args):
                     await ws.send(envelope("agency_request", request_payload(report, position, n), state["run_id"]))
                 next_send = time.monotonic() + args.interval
             state = await next_snapshot()
+            for m in state.get("messages", []):
+                if m["id"] in seen_messages:
+                    continue
+                seen_messages.add(m["id"])
+                if m["kind"] == "situation_report":
+                    b = m["body"]
+                    print(f"  SITUATION r{b.get('revision')} {m['incident_id']}: {b.get('text')} (confidence {b.get('confidence')})")
+                elif m["kind"] == "alert":
+                    print(f"  ALERT [{m['body'].get('severity')}] {m['body'].get('alert')}: {m['text']}")
+                elif m["kind"] == "dispatch":
+                    print(f"  DISPATCH {m['from']} -> {m['to']}: {m['text']}")
+                elif m["kind"] in ("unit_status", "handoff") and m["incident_id"] in my_incidents:
+                    print(f"  UNIT {m['from']}: {m['text']}")
             for e in state.get("events", []):
                 if e["id"] in seen_events:
                     continue
@@ -141,7 +156,7 @@ async def run(args):
             if inc["id"] in my_incidents:
                 reqs = [(q.get("needed_kind"), q.get("qty"), q.get("status")) for q in inc.get("resource_requests", [])]
                 print(f"{inc['id']}: status={inc['status']} first_on_scene={inc.get('first_on_scene')} "
-                      f"units={inc.get('resource_ids')} swarm_requested={reqs}")
+                      f"units={inc.get('resource_ids')} orchestrator_dispatched={reqs}")
         metrics = state.get("metrics", {}).get("agency")
         if metrics:
             print("agency metrics:", json.dumps(metrics))

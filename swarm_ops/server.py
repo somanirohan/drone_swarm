@@ -32,7 +32,8 @@ PROTOCOL = 'disruptionops.swarm.v2'
 COMMANDS = {'random_scenario', 'scenario', 'pause', 'resume', 'speed', 'reset',
             'fault', 'release_resource', 'ack_handoff', 'fleet', 'detect', 'random_incident'}
 INTEGRATION_COMMANDS = {'external_resource_update', 'agency_request', 'control', 'orchestrate_incident', 'assign', 'unassign',
-                        'recall_drone', 'cancel_incident', 'close_incident', 'update_incident'}
+                        'recall_drone', 'cancel_incident', 'close_incident', 'update_incident',
+                        'request_situation', 'node_attach', 'node_detach', 'node_order', 'node_post'}
 OLD_WEB_PATHS = {'/web/operations.html': '/web/ops/operations.html',
                  '/web/operations.css': '/web/ops/operations.css',
                  '/web/operations.js': '/web/ops/operations.js',
@@ -335,9 +336,13 @@ class OperationsServer:
                                      close_timeout=3, compression='deflate', write_limit=32768)
         self.port = self._listener.sockets[0].getsockname()[1]
         self._tick_task = asyncio.create_task(self.ticker())
+        if hasattr(self.engine, 'nodes'):
+            await self.engine.nodes.start()
         return self
 
     async def stop(self):
+        if hasattr(self.engine, 'nodes'):
+            await self.engine.nodes.stop()
         if self._bridge_task:
             self._bridge_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

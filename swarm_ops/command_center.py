@@ -3,10 +3,12 @@
 The swarm is an agency. This process is the orchestrator that talks to it:
 
     scenario script --agency_request--> swarm  (accepts or declines on its own)
-    swarm --events/snapshot (accepted, launched, on_scene, briefing, resource_request,
-            supply_delivered, handed_over, completed)--> command center (tracks each task)
-    swarm --resource_request--> command center --external_resource_update--> swarm
-        (orchestrator mode: this process commits ground units and drives them to the scene)
+    swarm --events/snapshot (accepted, launched, on_scene, briefing, supply_delivered,
+            handed_over, completed)--> command center (tracks each task)
+    swarm --situation_report / alert--> command center --external_resource_update--> swarm
+        (orchestrator mode: this process IS the orchestrator: it plans from the situation reports with the
+         stand-in planner (swarm_ops.nodes.orchestrator.AllocationPlanner), commits ground units and drives them
+         to the scene; it first tells the swarm to disable its built-in orchestrator)
         (standalone mode: nothing is committed; the engine's local mock answers)
 
 It uses only the public WebSocket protocol (disruptionops.swarm.v2) with the integration token
@@ -35,7 +37,7 @@ from pathlib import Path
 GROUND_SPEED = 9.0  # m/s, matches the engine's ground-unit speed
 TERMINAL = ("completed", "declined")
 # Order used when two statuses race: later wins for the "current" label.
-STATUS_RANK = {"requested": 0, "accepted": 1, "launched": 2, "on_scene": 3, "briefing": 4, "resource_request": 5,
+STATUS_RANK = {"requested": 0, "accepted": 1, "launched": 2, "on_scene": 3, "briefing": 4, "resource_request": 5, "dispatch_ordered": 5,
                "resource_assigned": 6, "supply_delivered": 6, "ground_arrived": 7, "retasked": 7, "recalled": 8,
                "handed_over": 9, "completed": 10, "declined": 10}
 
@@ -157,6 +159,7 @@ class CommandCenter:
         self.units = {}            # unit id -> committed ground unit (orchestrator mode)
         self.depots = []           # available ground resources seen before the first external update
         self.messages, self._seen_messages = [], set()
+        self.situation_reports, self.alerts, self.intake, self.planner = {}, [], {}, None
         self.events, self._seen_events = [], set()
         self.state = {}
         self.sim_t, self._last_sim_t = 0.0, None
@@ -166,6 +169,7 @@ class CommandCenter:
         self._external = False
         self.failed = []
         self._closing = set()
+        self._planned = set()
 
     # -- transport
     async def send(self, action, payload, command_id=None, timeout=5.0):
@@ -247,8 +251,8 @@ class CommandCenter:
                     continue  # not (yet) ours; retried while it stays in the snapshot window
             self._seen_events.add(event_id)
             self.events.append(event)
-            if event.get("kind") == "resource_request":
-                continue  # handled from the incident's open request list in _answer_requests
+            if event.get("kind") == "dispatch_order":
+                continue  # the built-in orchestrator's order; this client records its own
             for request_id in ids:
                 if request_id in self.tasks and status:
                     self._record(request_id, status, event.get("message", ""), event)
@@ -260,6 +264,13 @@ class CommandCenter:
                 continue
             self._seen_messages.add(key)
             self.messages.append(message)
+            body = message.get("body") or {}
+            if message.get("kind") == "situation_report":
+                self.situation_reports[message.get("incident_id")] = message
+            elif message.get("kind") == "alert":
+                self.alerts.append(message)
+            elif message.get("kind") == "report" and body.get("intake"):
+                self.intake[message.get("incident_id")] = body
             self.say(f"msg {message.get('from', '?')}->{message.get('to', '?')} [{message.get('kind', '?')}] {message.get('text', '')}"[:200])
 
     # -- the commander's own decisions
@@ -366,22 +377,44 @@ class CommandCenter:
         return await self.send("control", {"autonomy": autonomy, "reason": reason})
 
     def _answer_requests(self):
-        """Orchestrator mode: for every open swarm resource request commit ground units."""
+        """Orchestrator mode: plan from the swarm's situation reports (stand-in for DisruptionOps' planner) and commit ground units."""
         if self.mode != "orchestrator":
             return []
+        from swarm_ops.nodes.orchestrator import AllocationPlanner
+        self.planner = self.planner or AllocationPlanner()
         pending = []
-        for incident in self.state.get("incidents", []):
-            for rr in incident.get("resource_requests", []):
-                if rr["status"] != "open" or rr["request_id"] in self.resource_requests:
+        for iid, message in list(self.situation_reports.items()):
+            report = message["body"]
+            key = (iid, report.get("revision"))
+            if key in self._planned or report.get("controlled_by") == "disruptionops" or (report.get("scene") or {}).get("status") == "resolved":
+                continue
+            self._planned.add(key)
+            intake = self.intake.get(iid, {})
+            held = {}
+            for u in self.units.values():
+                if u["incident_id"] == iid and u["state"] not in ("released", "service_done"):
+                    held[u["kind"]] = held.get(u["kind"], 0) + 1
+            situation = dict(report["scene"])
+            pool = self._unit_pool()
+            resources = [{"id": p["id"], "kind": {"rescue": "rescue_team", "engineering": "jcb"}.get(sorted(p["kinds"])[0], sorted(p["kinds"])[0]), "state": "available", "capacity": p.get("capacity"),
+                          "name": p.get("name"), "position": p["position"][:2], "assigned_to": None} for p in pool if p["id"] not in {u["depot_id"] for u in self.units.values()}]
+            known = {k for p in pool for k in p["kinds"]}
+            plan, source, error, problems, latency = self.planner.plan(situation, {"resources": resources, "concurrent": []}, hint=intake.get("required_hint") or [],
+                                                                       owned=bool(intake.get("plan_owned", True)), known_kinds=known)
+            wanted = {q["kind"]: q["qty"] for q in plan["resource_requests"]}
+            if not wanted and intake.get("required_hint") and not held:
+                wanted = {k: 1 for k in intake["required_hint"]}
+            for kind, qty in wanted.items():
+                missing = qty - held.get(kind, 0)
+                if missing <= 0:
                     continue
-                units = [self._commit_unit(rr, incident) for _ in range(int(rr.get("qty", 1)))]
-                self.resource_requests[rr["request_id"]] = {"request_id": rr["request_id"], "incident_id": incident["id"], "kind": rr["needed_kind"],
-                                                            "qty": rr["qty"], "stage": rr.get("stage"), "raised_sim_t": rr.get("raised_at"),
-                                                            "committed_sim_t": self.sim_t, "units": [u["id"] for u in units]}
-                for request_id in self.by_incident.get(incident["id"], []):
-                    self._record(request_id, "resource_request", f"swarm asked for {rr['qty']}x {rr['needed_kind']} ({rr.get('stage')}); committing {[u['id'] for u in units]}")
-                if not self.by_incident.get(incident["id"]):
-                    self.say(f"(untracked incident {incident['id']}) swarm asked for {rr['qty']}x {rr['needed_kind']}; committing {[u['id'] for u in units]}")
+                rr = {"needed_kind": kind, "request_id": f"{iid}-DO{len(self.resource_requests) + 1}", "position": situation.get("position") or [0, 0, 0]}
+                units = [self._commit_unit(rr, {"id": iid, "position": rr["position"]}) for _ in range(missing)]
+                rid = f"{iid}-DO{len(self.resource_requests) + 1}"
+                self.resource_requests[rid] = {"request_id": rid, "incident_id": iid, "kind": kind, "qty": missing, "stage": f"plan:{source}", "committed_sim_t": self.sim_t,
+                                               "units": [u["id"] for u in units]}
+                for request_id in self.by_incident.get(iid, []):
+                    self._record(request_id, "dispatch_ordered", f"orchestrator plan ({source}) from situation r{report.get('revision')}: {missing}x {kind}; committing {[u['id'] for u in units]}")
                 pending.extend(units)
         return pending
 
@@ -468,8 +501,8 @@ class CommandCenter:
         for incident_id, incident in incidents.items():
             if incident.get("status") == "resolved" or incident_id in self._closing:
                 continue
-            kinds = {u["kind"] for u in self.units.values() if u["incident_id"] == incident_id and u["state"] in ("service_done", "released")}
-            if incident.get("required_kinds") and set(incident["required_kinds"]) <= kinds and incident.get("handed_over"):
+            mine = [u for u in self.units.values() if u["incident_id"] == incident_id]
+            if mine and all(u["state"] in ("service_done", "released") for u in mine) and incident.get("handed_over"):
                 done.append(incident_id)
         return done
 
@@ -520,6 +553,8 @@ class CommandCenter:
             try:
                 await asyncio.wait_for(self._ready.wait(), 10)
                 self.say(f"connected; run {self.run_id[:8]}, mode {self.mode}, {len(self.tasks_script)} task(s), scenario {self.scenario}")
+                if self.mode in ("orchestrator", "orchestrated"):
+                    await self.send("control", {"orchestrator": "external"})   # we are the orchestrator now
                 start = time.monotonic()
                 queue = sorted(self.tasks_script, key=lambda t: t["delay_s"])
                 while time.monotonic() - self._wall0 < self.timeout_s:

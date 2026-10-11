@@ -58,3 +58,12 @@ A centralised, deterministic multi-robot simulation. Allocation is a greedy sequ
 ## Re-check (end of this task)
 
 `swarm_ops/reasoning/belief.py` appeared during the task and is reflected above. Still absent: `swarm_ops/agents.py`, `swarm_ops/traffic.py`, any optimiser or escalation module under `reasoning/`. Those rows stay planned / in progress and must be re-verified by whoever lands them (grep the file, then change the status column).
+
+## Multi-node update
+
+| Aspect | Now |
+|---|---|
+| Situation assessment (belief.py) | runs in the `SwarmNode` to produce `situation_report` (people estimate/low/high, injuries, hazards, trend, confidence); hysteresis on significant change |
+| Needs, optimizer, planner (reasoning/) | run in the `OrchestratorNode`, a stand-in for DisruptionOps' planner; they no longer drive any swarm output |
+| Agency control loop (MAPE-K) | per node: monitor = inbox, plan = node decision (drone bid, unit choice, allocation), execute = world port; nodes interact only through messages |
+| Unit choice | each agency node picks the nearest feasible one of ITS units for a `dispatch` (exact kind first), with nearer-unit takeover |

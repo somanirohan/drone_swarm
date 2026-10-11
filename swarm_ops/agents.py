@@ -4,19 +4,16 @@ Everything here is deterministic and offline (no LLM in the decision path).
 
 * ``MessageBus``: every message between agents and to/from the command centre (orchestrator)
   is a record ``{id, t, from, to, kind, incident_id, request_id, text, body}``. Kinds:
-  task | accept | decline | report | status | resource_request | ack | cancel | handoff.
+  task | accept | decline | report | status | ack | cancel | handoff | situation_report | alert | dispatch | unit_status.
 * ``DecisionLog``: every decision is a trace ``{t, agent, decision, reason, options:[{id, score}]}``;
   ``fallback: true`` marks decisions taken by a fallback rule instead of the reasoner.
 * ``DroneAgent``: perceive -> decide (priority behaviour tree) -> act, with memory of its zone,
   sweep, commitments and the briefing revisions it produced. It evaluates its own bid for a task
   (route, recovery route, energy) and accepts or declines an award.
-* ``SwarmCoordinator``: the swarm-as-agency brain. It decides on orchestrator requests, runs the
-  single-item auction over drone bids, and plans each incident's response through ONE interface,
-  ``plan_response(incident)``: it builds a ``situation`` from the evidence (reports, drone and
-  ground observations, units with ETAs, lifelines) and calls ``swarm_ops.reasoning.plan_response
-  (situation, context)``. When that is unavailable or raises, a labelled fallback derives the
-  needed unit kinds from the DisruptionOps taxonomy data (capability needs -> best providing kind),
-  then from the engine's category templates. Plans are validated before they are applied.
+* ``SwarmCoordinator``: the swarm's drone-side brain. It decides on orchestrator requests (the swarm
+  accepts or declines DRONE work only) and runs the single-item auction over drone bids. It does NOT
+  decide which ground units or how many are needed: the swarm node (swarm_ops.nodes.swarm) reports the
+  situation and the orchestrator (swarm_ops.nodes.orchestrator, or DisruptionOps) allocates.
 """
 from __future__ import annotations
 
@@ -26,7 +23,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-MESSAGE_KINDS = ("task", "accept", "decline", "report", "status", "resource_request", "ack", "cancel", "handoff")
+MESSAGE_KINDS = ("task", "accept", "decline", "report", "status", "ack", "cancel", "handoff",
+                 "situation_report", "alert", "dispatch", "unit_status")
 URGENCIES = ("critical", "high", "normal", "low")
 DRONE_ROLES = ("assess", "supply", "relay", "overwatch", "search")
 SUPPLIES = ("first_aid", "medical", "food", "water")
@@ -54,6 +52,7 @@ class MessageBus:
         self._clock = clock
         self.log = deque(maxlen=keep)
         self.inboxes = {}
+        self.listeners = []   # world-side observers (e.g. the engine's order ledger); never node-to-node shortcuts
         self._seq = 0
 
     def post(self, sender, recipient, kind, text, incident_id=None, request_id=None, body=None):
@@ -65,6 +64,8 @@ class MessageBus:
         self.log.append(message)
         inbox = self.inboxes.setdefault(str(recipient), deque(maxlen=50))
         inbox.append(message)
+        for listener in list(self.listeners):
+            listener(message)
         return message
 
     def drain(self, agent_id):
@@ -300,40 +301,8 @@ class DroneAgent:
 
 
 # ---------------------------------------------------------------- coordinator
-def _load_taxonomy():
-    """Taxonomy via the engine's reference data (DisruptionOps client: live or assets), else the asset file."""
-    try:
-        from swarm_ops.engine import reference_data
-        taxonomy = reference_data().get("taxonomy")
-        if taxonomy:
-            return taxonomy
-    except ImportError:
-        pass
-    try:
-        return json.loads(TAXONOMY_PATH.read_text(encoding="utf8"))
-    except (OSError, ValueError):
-        return None
-
-
-def _reasoner():
-    """swarm_ops.reasoning.plan_response if the reasoning package provides it, else None."""
-    try:
-        from swarm_ops.reasoning import plan_response
-    except ImportError:
-        return None
-    if not callable(plan_response):
-        return None
-    try:
-        # One reasoner (with its per-incident memory) per simulation run: incident ids repeat across runs.
-        from swarm_ops.reasoning import Reasoner
-        instance = Reasoner()
-        return lambda situation, context: plan_response(situation, context, reasoner=instance)
-    except Exception:
-        return plan_response
-
-
 class SwarmCoordinator:
-    """The swarm-as-agency brain (see module docstring)."""
+    """The swarm-as-agency drone-side brain (see module docstring)."""
 
     id = "swarm"
 
@@ -341,10 +310,6 @@ class SwarmCoordinator:
         self.sim = sim
         self.bus = bus
         self.decisions = decisions
-        self.taxonomy = _load_taxonomy()
-        self.reasoner = _reasoner()
-        self.plans = 0
-        self.fallbacks = 0
 
     # --- auction over the drones' own bids ---
     def award(self, incident, candidates, agents, supply_only):
@@ -388,131 +353,3 @@ class SwarmCoordinator:
         self.bus.post(self.id, "command_center", "accept" if accepted else "decline",
                       f"{'Accepted' if accepted else 'Declined'} {request['request_id']}: {result['reason']}.", result.get("incident_id"), request["request_id"],
                       {k: result.get(k) for k in ("eta_s", "assigned_drones", "plan", "merged")})
-
-    # --- response planning (one interface) ---
-    def situation(self, incident):
-        return self.sim._situation(incident)
-
-    def plan_response(self, incident, reason="evidence changed"):
-        """Plan (or re-plan) one incident's response from its situation; apply it after validation."""
-        sim = self.sim
-        if incident.get("control_mode") == "orchestrated":
-            return None  # DisruptionOps decides; the swarm never raises requests or self-assigns here
-        situation = self.situation(incident)
-        incident["situation"] = situation
-        context = sim._planning_context()
-        plan, source, error = None, "reasoner", None
-        started = time.perf_counter()
-        if self.reasoner is not None:
-            try:
-                plan = self.reasoner(situation, context)
-            except Exception as exc:  # the fallback must keep the swarm working
-                error = f"{type(exc).__name__}: {exc}"[:160]
-                plan = None
-        latency_ms = round((time.perf_counter() - started) * 1000, 2)
-        if not isinstance(plan, dict):
-            plan, source = self._fallback_plan(incident, situation), "fallback"
-        plan, problems = self._validate(plan)
-        self.plans += 1
-        if source == "fallback":
-            self.fallbacks += 1
-        applied = sim._apply_plan(incident, plan, source, reason)
-        why = plan.get("rationale") or ", ".join(f"{q['qty']}x {q['kind']}" for q in plan["resource_requests"]) or "no ground unit needed"
-        if error:
-            why = f"reasoner error ({error}); {why}"
-        elif source == "fallback" and self.reasoner is None:
-            why = f"reasoner unavailable; {why}"
-        if problems:
-            why += f"; dropped invalid plan items: {'; '.join(problems[:3])}"
-        self.decisions.record(self.id, "plan_response", f"{reason}: {why}",
-                              [{"id": q["kind"], "score": q["qty"]} for q in plan["resource_requests"]], fallback=source == "fallback",
-                              incident_id=incident["id"], decision_source="reasoner" if source == "reasoner" else "fallback",
-                              plan_source=plan.get("source") or source, applied=applied, latency_ms=latency_ms,
-                              inputs={k: situation.get(k) for k in ("people", "vulnerable", "injured", "trend", "briefing_revision", "severity")},
-                              factors={"hazards": situation.get("hazards"), "escalation": plan.get("escalation")})
-        return plan
-
-    def _fallback_plan(self, incident, situation):
-        """FALLBACK only (reasoner unavailable or failed): capability needs from the DisruptionOps taxonomy
-        data -> best providing kind available to the swarm; else the engine's category template."""
-        sim = self.sim
-        hint = list(incident.get("required_hint") or incident["required_kinds"])
-        if not incident.get("plan_owned"):
-            # Prescribed scenario kinds stay authoritative; the plan only restates them.
-            kinds, source = hint, "fallback:prescribed"
-        else:
-            kinds, source = self._taxonomy_kinds(incident), "fallback:disruptionops-taxonomy"
-            if not kinds:
-                kinds, source = hint or list(sim.INCIDENT_TEMPLATES.get(incident["category"], (None,) * 5)[4] or []), "fallback:engine-template"
-        payloads = [n for n in incident["needs"] if n in SUPPLIES and n not in incident["supplied"]]
-        return {"resource_requests": [{"kind": k, "qty": 1, "urgency": None, "why": source} for k in kinds],
-                "drones": [{"role": "assess"}] + [{"role": "supply", "payload": p} for p in payloads],
-                "rationale": f"{source}: {', '.join(kinds) or 'no ground kind'}", "source": source}
-
-    def _taxonomy_kinds(self, incident):
-        tax = self.taxonomy
-        if not tax:
-            return []
-        category = incident.get("disruptionops_category") or CATEGORY_TO_DO.get(incident["category"], incident["category"])
-        entry = next((c for c in tax.get("incident_categories", []) if c.get("id") == category), None)
-        if entry is None:
-            return []
-        needs = entry.get("needs") or {}
-        if isinstance(needs, list):
-            needs = {n.get("capability"): n.get("qty", 1) for n in needs}
-        available = self.sim._known_kinds()
-        out = []
-        for capability in needs:
-            providers = (tax.get("kinds_providing") or {}).get(capability) or {}
-            offers = sorted(((score, DO_TO_SIM.get(kind, kind)) for kind, score in providers.items() if DO_TO_SIM.get(kind, kind) in available),
-                            key=lambda o: (-o[0], o[1]))
-            if offers and offers[0][1] not in out:
-                out.append(offers[0][1])
-        return out
-
-    def _validate(self, plan):
-        """Normalise a plan; unknown kinds/roles/payloads are dropped and reported."""
-        problems = []
-        known = set(self.sim._known_kinds()) | set(self.sim.RESOURCE_KIND_NAMES)
-        requests = []
-        raw = plan.get("agency_requests", plan.get("resource_requests", plan.get("requests", plan.get("required_kinds", []))))
-        for item in raw if isinstance(raw, list) else []:
-            if isinstance(item, str):
-                item = {"kind": item}
-            if not isinstance(item, dict):
-                problems.append(f"request {item!r}"); continue
-            kind = item.get("sim_kind") or DO_TO_SIM.get(item.get("kind"), item.get("kind"))
-            if kind not in known:
-                problems.append(f"kind {kind!r}"); continue
-            qty = item.get("qty", 1)
-            qty = max(1, min(10, int(qty))) if isinstance(qty, (int, float)) and not isinstance(qty, bool) and math.isfinite(qty) else 1
-            urgency = item.get("urgency")
-            urgency = urgency if urgency in URGENCIES else {"immediate": "critical", "soon": "high", "standby": "normal"}.get(urgency)
-            entry = next((r for r in requests if r["kind"] == kind), None)
-            if entry:
-                entry["qty"] = max(entry["qty"], qty)
-            else:
-                requests.append({"kind": kind, "qty": qty, "urgency": urgency, "why": str(item.get("why") or item.get("rationale") or "")[:160]})
-        drones = []
-        for item in plan.get("drones", []) if isinstance(plan.get("drones"), list) else []:
-            if not isinstance(item, dict) or item.get("role") not in DRONE_ROLES:
-                problems.append(f"drone {item!r}"); continue
-            payload = None if item.get("payload") in (None, "none") else item.get("payload")
-            if payload is not None and payload not in SUPPLIES:
-                problems.append(f"payload {payload!r}"); payload = None
-            drones.append({"role": item["role"], "payload": payload, "count": max(1, min(3, int(item.get("count", 1) or 1)))})
-        severity = plan.get("severity", (plan.get("assessment") or {}).get("severity"))
-        severity = max(1, min(5, int(severity))) if isinstance(severity, (int, float)) and not isinstance(severity, bool) else None
-        escalation = plan.get("escalation") if isinstance(plan.get("escalation"), str) else None
-        deltas = None
-        if isinstance(plan.get("requests_delta"), list):
-            deltas = []
-            for item in plan["requests_delta"]:
-                kind = DO_TO_SIM.get((item or {}).get("sim_kind") or (item or {}).get("kind"), (item or {}).get("sim_kind") or (item or {}).get("kind"))
-                delta = (item or {}).get("delta")
-                if kind not in known or not isinstance(delta, int) or isinstance(delta, bool) or delta == 0:
-                    problems.append(f"delta {item!r}"[:60]); continue
-                why = next((s.get("why") for s in plan.get("stand_down") or [] if DO_TO_SIM.get(s.get("kind"), s.get("kind")) == kind), None) if delta < 0 else None
-                deltas.append({"kind": kind, "delta": max(-10, min(10, delta)), "why": str(why or "")[:160]})
-        return {"resource_requests": requests, "requests_delta": deltas, "drones": drones, "severity": severity, "escalation": escalation,
-                "rationale": str(plan.get("rationale") or "")[:240], "source": str(plan.get("source") or "")[:60] or None}, problems

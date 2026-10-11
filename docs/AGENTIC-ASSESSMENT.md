@@ -70,7 +70,7 @@ Verdict: a well-engineered **workflow with agent-shaped parts**. Autonomy is bou
 | Routing / energy | `_drone_path` (A* flight grid), `_ground_path`, 0.018 Wh/m model | Classical algorithms; see `ALGORITHMS.md`. |
 | "Behaviour tree" | `engine._behavior` (~line 1899) | A **classifier** that maps drone `state` to a label (search, confirm, assess, relay, return, ...). It does not choose actions; `step()` does. Not a behaviour tree in the control sense. |
 | Search | `_update_zones`, `_next_search` | Probability-weighted coverage cells; greedy next cell. |
-| Briefing / requests | `_drone_arrival_brief`, `_raise_resource_request` | Rule-triggered messages (people exceed seats, etc.). |
+| Briefing / requests | `SwarmNode.report`, `OrchestratorNode.check_capacity` | The swarm reports the situation (hysteresis); the orchestrator decides on seats vs people. |
 | Memory | none | Only simulation state; `search_map` probabilities are the nearest thing. |
 | LLM | none | Nothing in the swarm calls a model. |
 
@@ -83,7 +83,7 @@ It is a **deterministic multi-agent simulation with an agency-shaped interface**
 ### 2.3 What would make it more agentic (in order of value)
 
 1. **Explicit agent classes with a decision trace** (in progress by the ENGINE work): each drone, the dock/fleet coordinator and the agency liaison as objects that read an observation and return a decision plus a reason, logged in `decisions`. This makes today's logic inspectable even though it stays deterministic.
-2. **A real message log** between command center and agents (`messages`: task, accept, decline, report, status, resource_request, ack, cancel, handoff), so behaviour is observable as a conversation. `/ops/messages` and `swarm_ops/command_center.py` consume it.
+2. **A real message log** between command center and agents (`messages`: task, accept, decline, report, status, ack, cancel, handoff, situation_report, alert, dispatch, unit_status), so behaviour is observable as a conversation. `/ops/messages` and `swarm_ops/command_center.py` consume it.
 3. **Decentralised bidding**: each drone computes its own bid from local state and the coordinator only selects; allows faults and link loss to change outcomes without central code paths.
 4. **Real behaviour trees** (or a utility selector) that pick actions in `step()`, rather than `_behavior` labelling afterwards.
 5. **Optional LLM liaison** (same pattern as DO): a model may rewrite briefings, summarise a situation for the commander, or propose a retask, but accept/decline and routing stay deterministic with a fallback and a guardrail layer. Do not let a model change energy or no-fly checks.
@@ -110,6 +110,19 @@ Decided 2026-10-10: **the user rejected LLM-based decisions.** An earlier draft 
 - **Guardrails stay as hard constraints:** bounds, no-fly zones, energy-feasible route, open-incident and launch caps, schema validation of incoming commands.
 - **Any rule-based fallback is labelled** in the decision trace as such, not presented as inference.
 - **Command center input.** `swarm_ops/command_center.py` sends `payload.situation` taken from DisruptionOps data (the `pccoe_pawana_night` reports and the migration 029/030 catalog): report text, DisruptionOps category id, ward and place, people and reporter count, `crowd_size`, `vulnerable` groups, `injured_reported`, `hazards` and the three nearest lifelines. Vulnerable groups, injuries and hazards are read from the report text; fields the source does not state are omitted. These are the observations the belief fuses.
-- **Answering resource requests.** In orchestrator mode the command center commits the nearest free unit of the matching kind from `assets/operations/agency-catalog.json` (the swarm's snapshot position wins when it places that unit), never twice, with a labelled synthetic unit only if none is free. That is nearest-neighbour dispatch, a rule, and it is named so in the glossary.
+- **Allocating from situation reports.** In orchestrator mode the command center plans from the swarm's `situation_report`s with the stand-in planner (`AllocationPlanner`) and commits the nearest free unit of the matching kind from `assets/operations/agency-catalog.json` (the swarm's snapshot position wins when it places that unit), never twice, with a labelled synthetic unit only if none is free. That is nearest-neighbour dispatch, a rule, and it is named so in the glossary.
 - **Still true:** the command center is deterministic and replays a scenario script; it does not decide tasks itself.
 - **Compared with DisruptionOps:** DO keeps the allocator deterministic (CP-SAT) and uses a model only for language and the optional Commander. The swarm now matches that spirit more strongly by having no model at all in the decision path.
+
+
+## Multi-node design (current)
+
+The swarm is one node among several, all running concurrently and talking only through bus messages (`swarm_ops/nodes/`):
+
+| node | owns | decides | emits |
+|---|---|---|---|
+| `SwarmNode` | the drones | accept/decline DRONE work, which drone, role, dropping its own onboard supplies | `situation_report`, `alert`, `accept`/`decline` |
+| `OrchestratorNode` (id `command_center`) | the plan (stand-in for DisruptionOps) | which unit kinds and how many, from situation reports (belief -> needs -> optimizer -> planner; labelled fallback) | `dispatch`, `cancel` |
+| `AmbulanceService`, `FireService`, `RescueService` (rescue + boats), `PoliceService`, `PublicWorks` (pump/JCB, tankers, trucks, buses) | their units | which of ITS units answers a dispatch; nearest-unit takeover | `unit_status`, `handoff`, `decline` |
+
+The engine only simulates world physics (movement on roads, water and air) and exposes a small world port to the nodes. The swarm never says how many ambulances are needed: it says what it sees (people, injuries, hazards, access, "PC-AMB-06 ambulance 400 m away, en route") and DisruptionOps (or the stand-in) allocates. With DisruptionOps connected the `OrchestratorNode` is disabled and DisruptionOps dispatches through `orchestrate_incident`/`assign`/`external_resource_update`. Agency nodes can run in-process (default), as asyncio tasks (live server) or as separate WebSocket processes. Honest limits: the stand-in planner is the same simulation-grade reasoning package as before; the engine still advances all units' physics in one loop; node cadence is simulated seconds.
