@@ -117,4 +117,31 @@ Not in the matrix, still open: browser UI checks (`operations-browser.cjs`) were
 
 ## 3. Matrix results
 
-See the end of this file (updated after the matrix ran).
+Run 2026-10-11 against ENGINE commit 3182216 (orchestrated mode), `tests/test_command_center.py::OrchestratedMatrix`, real server on port 0, integration token over WebSocket, engine at 16x. `tests.test_command_center`: 30 tests, all pass (about 150 s, of which the scripted runs are most).
+
+| # | Result | Test and how it was tested; caveats |
+|---|---|---|
+| G1 | pass | `test_g01_*`: drone (count 1) + external ambulance; reply `accept_full`, `control_mode` orchestrated, ambulance dispatched, drone tasked, handoff reached. |
+| G2 | pass | `test_g02_*`: ambulance only; after ~40 simulated seconds no drone tasked, `assigned_drones` empty, no `resource_requests`. |
+| G3 | pass | `test_g03_*`: `assign` after creation dispatches the late unit. |
+| G4 | pass | `test_g04_*`: `recall_drone` releases the drone, which goes to `returning`; removed from `assigned_drones`. |
+| G5 | pass | `test_g05_*`: `cancel_incident` gives outcome `cancelled`, `close_incident` gives `completed`; drone released both times. |
+| G6 | pass | `test_g06_*`: people, severity and situation updated. |
+| G7 | pass | `test_g07_*`: autonomous and orchestrated incidents side by side; the swarm added no drones or resource requests to the orchestrated one. |
+| G8 | pass (with caveat) | `test_g08_*`: ground-first and drone-first both observed, but with external units placed near/far on purpose rather than catalog units on real roads. |
+| G9 | pass (reinterpreted) | `test_g09_*`: `unassign` frees the far unit (available) and a later `assign` sends the nearer one. This is the orchestrated equivalent; the autonomous `_maybe_reassign_nearer` is still not isolated by a test. |
+| G10 | pass | `test_g10_*`: same `request_id` on two command ids returns `duplicate`, one incident. |
+| G11 | pass | `test_g11_*`: `decline_jurisdiction` for both `orchestrate_incident` and `agency_request`. |
+| G12 | pass | `test_g12_*`: `need_info`, no incident created. Only for `orchestrate_incident`; `agency_request` without a position is a command error, not `need_info`. |
+| G13 | pass | `test_g13_*`: after 12 open incidents the next is `decline_capacity`. |
+| G14 | pass (dock scenario) | `test_g14_*`: needs a docked fleet for a launch cap, so it runs on `dock_fire`; 6 requested, fewer launched, `accept_partial`. Without docks all 6 launch. |
+| G15 | pass | `test_g15_*`: `control paused` makes `orchestrate_incident` `decline_capacity` and declines `agency_request`; `running` accepts again. |
+| G16 | pass (weak assertion) | `test_g16_*`: crash, link loss and battery on the assigned drone: incident stays open and no replacement is self-assigned. It does not assert what DisruptionOps should be told or that the unit is re-offered. |
+| G17 | pass | `test_g17_*`: a new session sees the orchestrated incident in its first snapshot, a repeated `request_id` is a duplicate, and `/ops/events` replays its events. |
+| G18 | pass | `test_g18_*`: a view-only client cannot orchestrate, control or cancel. |
+| G19 | pass | `test_g19_*`: operator token rejected for integration commands, integration token rejected for `reset`; operator `pause` still works. |
+| G20 | pass | `test_g20_*`: malformed positions, empty ids, unknown incident or drone, bad autonomy, bad update values are rejected and the session stays usable. |
+| G21 | pass | `test_g21_*`: 14 commands in a burst on an integration session close the socket. |
+| extra | pass | `test_scripted_orchestrated_run_completes`: `CommandCenter.run()` in `orchestrated` mode, tasks accepted, zero swarm resource requests, at least one completed. |
+
+Still not covered: reconnect of a session during a long mission with in-flight commands (only state and replay are checked), concurrent orchestration from two integration clients, `delayed` reply (no test forces zero launches), DisruptionOps-side behaviour (the real adapter was not run against a live backend), browser UI.

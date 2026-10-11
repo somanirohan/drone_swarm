@@ -1,7 +1,7 @@
 param(
     [int]$Port = 8861,
     [string]$Scenario = 'pccoe_pawana_night',
-    [ValidateSet('orchestrator', 'standalone')][string]$Mode = 'orchestrator',
+    [ValidateSet('orchestrator', 'standalone', 'orchestrated')][string]$Mode = 'orchestrator',
     [int]$Seed = 42,
     [int]$Fleet = 20,
     [int]$Timeout = 600,

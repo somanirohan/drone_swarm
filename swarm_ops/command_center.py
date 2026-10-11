@@ -144,8 +144,8 @@ def _normalise(task, index, delay=None):
 class CommandCenter:
     def __init__(self, url, token, tasks, *, mode="orchestrator", timeline_path=None, timeout_s=300.0,
                  scenario="custom", log=print, min_gap_s=0.15, tick_s=1.0):
-        if mode not in ("orchestrator", "standalone"):
-            raise ValueError("mode must be orchestrator or standalone")
+        if mode not in ("orchestrator", "standalone", "orchestrated"):
+            raise ValueError("mode must be orchestrator, standalone or orchestrated")
         self.url, self.token, self.mode = url, token, mode
         self.tasks_script = tasks
         self.scenario, self.timeline_path, self.timeout_s = scenario, timeline_path, timeout_s
@@ -271,18 +271,24 @@ class CommandCenter:
         payload = {k: v for k, v in payload.items() if v is not None}
         record = self.tasks.setdefault(request_id, {"request_id": request_id, "task": task, "status": "requested", "incident_id": None,
                                                     "accepted": None, "history": [], "attempts": 0})
+        action = "agency_request"
+        if self.mode == "orchestrated":
+            action = "orchestrate_incident"
+            payload = {k: v for k, v in payload.items() if k not in ("kind", "requested_by", "sim_run_id", "needs")}
+            payload.update(external_id=f"DO-{request_id}", requested_by="DisruptionOps command center", assignments=self.plan_assignments(task))
         for attempt in range(1, 4):
             record["attempts"] = attempt
-            ack = await self.send("agency_request", payload, command_id=f"{request_id}#{attempt}" if attempt > 1 else request_id)
+            ack = await self.send(action, payload, command_id=f"{request_id}#{attempt}" if attempt > 1 else request_id)
             if not ack.get("ok"):
                 self._record(request_id, "declined", f"command rejected: {ack.get('error')}")
                 return record
             result = ack["result"]
             record["accepted"], record["incident_id"] = result.get("accepted"), result.get("incident_id")
-            record["swarm_answer"] = {k: result.get(k) for k in ("reason", "eta_s", "assigned_drones", "plan", "merged", "duplicate")}
+            record["reply_kind"] = result.get("reply_kind")
+            record["swarm_answer"] = {k: result.get(k) for k in ("reason", "reply_kind", "units", "eta_s", "assigned_drones", "plan", "merged", "duplicate")}
             if result.get("accepted"):
                 self._link(result["incident_id"], request_id)
-                self._record(request_id, "accepted", f"{result.get('reason')}; eta {result.get('eta_s')}s; drones {result.get('assigned_drones')}")
+                self._record(request_id, "accepted", f"[{result.get('reply_kind')}] {result.get('reason')}; eta {result.get('eta_s')}s; drones {result.get('assigned_drones')}")
                 return record
             if "retry later" in str(result.get("reason")):
                 self.say(f"{request_id} swarm busy ({result['reason']}); retrying in 5 s")
@@ -292,6 +298,72 @@ class CommandCenter:
             return record
         self._record(request_id, "declined", "swarm stayed busy after 3 attempts")
         return record
+
+    def plan_assignments(self, task):
+        """ORCHESTRATED mode: the command center decides who goes (the swarm only executes): one assessing drone plus the
+        nearest free catalog unit for each ground kind the category requires."""
+        if "assignments" in task:
+            return task["assignments"]
+        required = task.get("required")
+        if required is None:
+            try:
+                from swarm_ops.engine import OperationsSimulation
+                required = OperationsSimulation.INCIDENT_TEMPLATES[task.get("category", "medical")][4]
+            except Exception:  # noqa: BLE001
+                required = []
+        if not hasattr(self, "_taken_ids"):
+            self._taken_ids = set()
+        resources = []
+        for kind in required:
+            rr = {"needed_kind": kind, "position": task["position"]}
+            pool = sorted((p for p in self._unit_pool() if kind in p["kinds"] and p["id"] not in self._taken_ids),
+                          key=lambda p: (_dist(p["position"], task["position"]), p["id"]))
+            if pool:
+                self._taken_ids.add(pool[0]["id"])
+                resources.append({"id": pool[0]["id"], "kind": kind, "agency": pool[0].get("operator") or "DisruptionOps"})
+        return {"drones": [{"count": 1, "role": "assess"}], "resources": resources}
+
+    # -- thin wrappers over the integration commands (usable from scripts and tests after open())
+    async def open(self):
+        from websockets.asyncio.client import connect
+        self._ready = asyncio.Event()
+        url = self.url + ("&" if "?" in self.url else "?") + "token=" + urllib.parse.quote(self.token)
+        self.ws = await connect(url, max_size=None, open_timeout=10)
+        self._reader_task = asyncio.create_task(self._reader())
+        await asyncio.wait_for(self._ready.wait(), 10)
+        return self
+
+    async def close(self):
+        task = getattr(self, "_reader_task", None)
+        if task:
+            task.cancel()
+        if getattr(self, "ws", None):
+            await self.ws.close()
+
+    async def orchestrate(self, request_id, position, category, assignments, **extra):
+        payload = {"request_id": request_id, "position": position, "category": category, "assignments": assignments, **extra}
+        return await self.send("orchestrate_incident", {k: v for k, v in payload.items() if v is not None})
+
+    async def assign(self, incident_id, drones=(), resources=()):
+        return await self.send("assign", {"incident_id": incident_id, "drones": list(drones), "resources": list(resources)})
+
+    async def unassign(self, incident_id, drone_ids=(), resource_ids=()):
+        return await self.send("unassign", {"incident_id": incident_id, "drone_ids": list(drone_ids), "resource_ids": list(resource_ids)})
+
+    async def recall_drone(self, drone_id, reason="recalled by command center"):
+        return await self.send("recall_drone", {"drone_id": drone_id, "reason": reason})
+
+    async def update_incident(self, incident_id, **fields):
+        return await self.send("update_incident", {"incident_id": incident_id, **fields})
+
+    async def cancel_incident(self, incident_id, reason="cancelled"):
+        return await self.send("cancel_incident", {"incident_id": incident_id, "reason": reason})
+
+    async def close_incident(self, incident_id, reason="closed"):
+        return await self.send("close_incident", {"incident_id": incident_id, "reason": reason})
+
+    async def control(self, autonomy, reason=None):
+        return await self.send("control", {"autonomy": autonomy, "reason": reason})
 
     def _answer_requests(self):
         """Orchestrator mode: for every open swarm resource request commit ground units."""
@@ -552,7 +624,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Command center agent for the swarm (simulation only).")
     parser.add_argument("--url", default="ws://127.0.0.1:8787/ops/ws")
     parser.add_argument("--scenario", default="pccoe_pawana_night", help="engine scenario id, a JSON task file, or 'random'")
-    parser.add_argument("--mode", choices=("orchestrator", "standalone"), default="orchestrator")
+    parser.add_argument("--mode", choices=("orchestrator", "standalone", "orchestrated"), default="orchestrator")
     parser.add_argument("--timeline", default=str(Path(__file__).resolve().parents[1] / ".cache" / "command-center" / "timeline.json"))
     parser.add_argument("--timeout", type=float, default=600.0, help="wall-clock seconds before giving up")
     parser.add_argument("--seed", type=int, default=7)
