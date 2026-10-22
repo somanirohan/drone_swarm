@@ -1,0 +1,35 @@
+{
+  "review_date": "2026-10-10",
+  "swarm_commit": "d65a5388827eb5d93a4016e51ff0184f695296f2",
+  "disruptionops_commit": "4e87ade9dc5da76ae55651388fd8199aba6cd36a",
+  "reference_clone": "D:\\drone_research_reference\\DisruptionOps",
+  "production_checked": false,
+  "implementation_changed": false,
+  "swarm_files": [
+    "README.md",
+    "PRODUCTION-ARCHITECTURE.md",
+    "disaster_demo.py",
+    "agentic_swarm.py",
+    "ai_planner.py",
+    "jev_planner.py",
+    "web_stream.py"
+  ],
+  "disruptionops_files": [
+    "README.md",
+    "docs/DRONE_SWARM.md",
+    "docs/architecture/README.md",
+    "docs/architecture/03-system-architecture.dot",
+    "backend/app/api/v1/drone.py",
+    "backend/app/drone/swarm.py",
+    "backend/app/drone/service.py",
+    "backend/app/agents/gate.py",
+    "backend/app/solver/allocation.py",
+    "backend/app/solver/routing.py",
+    "backend/app/core/ingest.py",
+    "backend/app/api/v1/ingest.py",
+    "backend/app/api/v1/router.py",
+    "backend/app/regions.py",
+    "backend/tests/test_drone_swarm.py",
+    "frontend/indradhanu/src/routes/admin/droneApi.ts"
+  ]
+}

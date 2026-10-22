@@ -1,0 +1,789 @@
+{
+  "schema_version": 1,
+  "status": "complete",
+  "generated_at": "2026-10-10T08:04:23.898773+00:00",
+  "local_only": true,
+  "world_path": "D:\\drone_swarm\\assets\\operations\\pune-world.json",
+  "world_sha256": "de5f1ee5503e5ba920bb1a1ea87829c2d0d0af9022d2713bc51b3a23929cb16d",
+  "engine_sha256": "fc5ba6ffe152de21fa8e033f8b7d130a7f2ce735a0abe3af486583049790be0b",
+  "world": {
+    "buildings": 1175,
+    "roads": 330,
+    "bounds": [
+      -600,
+      -600,
+      600,
+      600
+    ],
+    "road_points": 1678,
+    "out_of_bounds_road_points": 0,
+    "terrain_present": true
+  },
+  "cases": [
+    {
+      "scenario": "rooftop_flood",
+      "seed": 42,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 2482.434,
+      "simulation_compute_seconds": 8.794,
+      "passed": true,
+      "failures": [],
+      "fault": null,
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 0,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "flood",
+          "status": "resolved",
+          "people": 7,
+          "evacuated_people": 7,
+          "handed_over": true,
+          "required_kinds": [
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 191.5,
+          "position": [
+            -224.85250000000002,
+            91.7975,
+            7.5
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 108.0,
+          "position": [
+            85.42,
+            -273.79,
+            0
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 3,
+        "faults": 0,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "rooftop_flood",
+      "seed": 91,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 3917.037,
+      "simulation_compute_seconds": 11.699,
+      "passed": true,
+      "failures": [],
+      "fault": null,
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 0,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "flood",
+          "status": "resolved",
+          "people": 7,
+          "evacuated_people": 7,
+          "handed_over": true,
+          "required_kinds": [
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 277.0,
+          "position": [
+            -247.165,
+            397.0025,
+            5.5
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 118.75,
+          "position": [
+            46.11,
+            -254.74,
+            0
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 3,
+        "faults": 0,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "medical_supply",
+      "seed": 42,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 6195.813,
+      "simulation_compute_seconds": 11.482,
+      "passed": true,
+      "failures": [],
+      "fault": null,
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 0,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "medical",
+          "status": "resolved",
+          "people": 2,
+          "evacuated_people": 2,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 110.0,
+          "position": [
+            85.42,
+            -273.79,
+            0
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "flood",
+          "status": "resolved",
+          "people": 3,
+          "evacuated_people": 3,
+          "handed_over": true,
+          "required_kinds": [
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 117.0,
+          "position": [
+            -224.85250000000002,
+            91.7975,
+            7.5
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 3,
+        "faults": 0,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "medical_supply",
+      "seed": 91,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 8594.598,
+      "simulation_compute_seconds": 10.936,
+      "passed": true,
+      "failures": [],
+      "fault": null,
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 0,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "medical",
+          "status": "resolved",
+          "people": 2,
+          "evacuated_people": 2,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 120.75,
+          "position": [
+            46.11,
+            -254.74,
+            0
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "flood",
+          "status": "resolved",
+          "people": 7,
+          "evacuated_people": 7,
+          "handed_over": true,
+          "required_kinds": [
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 277.0,
+          "position": [
+            -247.165,
+            397.0025,
+            5.5
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 3,
+        "faults": 0,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "blocked_bridge",
+      "seed": 42,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 4143.318,
+      "simulation_compute_seconds": 7.191,
+      "passed": true,
+      "failures": [],
+      "fault": null,
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 1,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "blocked_route",
+          "status": "resolved",
+          "people": 6,
+          "evacuated_people": 6,
+          "handed_over": true,
+          "required_kinds": [
+            "engineering",
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue",
+            "engineering"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 138.0,
+          "position": [
+            85.42,
+            -273.79,
+            0
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 108.0,
+          "position": [
+            85.42,
+            -273.79,
+            0
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 1,
+        "faults": 0,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "blocked_bridge",
+      "seed": 91,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 5498.478,
+      "simulation_compute_seconds": 7.513,
+      "passed": true,
+      "failures": [],
+      "fault": null,
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 1,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "blocked_route",
+          "status": "resolved",
+          "people": 6,
+          "evacuated_people": 6,
+          "handed_over": true,
+          "required_kinds": [
+            "engineering",
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue",
+            "engineering"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 161.75,
+          "position": [
+            -60.89,
+            -332.9,
+            0
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 118.75,
+          "position": [
+            46.11,
+            -254.74,
+            0
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 1,
+        "faults": 0,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "rooftop_flood",
+      "seed": 43,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 2715.268,
+      "simulation_compute_seconds": 8.766,
+      "passed": true,
+      "failures": [],
+      "fault": {
+        "kind": "crash",
+        "drone_id": "D41",
+        "incident_id": "I001",
+        "accepted": true
+      },
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 0,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "flood",
+          "status": "resolved",
+          "people": 4,
+          "evacuated_people": 4,
+          "handed_over": true,
+          "required_kinds": [
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 137.0,
+          "position": [
+            -183.8075,
+            272.345,
+            6.5
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 130.75,
+          "position": [
+            304.62,
+            19.89,
+            0
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 49,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 3,
+        "faults": 1,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "medical_supply",
+      "seed": 43,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 5833.847,
+      "simulation_compute_seconds": 8.612,
+      "passed": true,
+      "failures": [],
+      "fault": {
+        "kind": "battery",
+        "drone_id": "D37",
+        "incident_id": "I001",
+        "accepted": true
+      },
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 0,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 130.75,
+          "position": [
+            304.62,
+            19.89,
+            0
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "flood",
+          "status": "resolved",
+          "people": 4,
+          "evacuated_people": 4,
+          "handed_over": true,
+          "required_kinds": [
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 137.0,
+          "position": [
+            -183.8075,
+            272.345,
+            6.5
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 3,
+        "faults": 1,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    },
+    {
+      "scenario": "blocked_bridge",
+      "seed": 43,
+      "fleet": 50,
+      "simulated_seconds": 600,
+      "initialization_ms": 4322.164,
+      "simulation_compute_seconds": 7.198,
+      "passed": true,
+      "failures": [],
+      "fault": {
+        "kind": "link",
+        "drone_id": "D41",
+        "incident_id": "I001",
+        "accepted": true,
+        "uncertainty_retained": true,
+        "recall_confirmation_required": true
+      },
+      "flood_closed_segments": 152,
+      "bridge_closed_segments": 1,
+      "incidents": [
+        {
+          "id": "I001",
+          "category": "blocked_route",
+          "status": "resolved",
+          "people": 6,
+          "evacuated_people": 6,
+          "handed_over": true,
+          "required_kinds": [
+            "engineering",
+            "rescue"
+          ],
+          "completed_kinds": [
+            "rescue",
+            "engineering"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": true,
+          "resolved_at": 142.25,
+          "position": [
+            61.39,
+            -249.02,
+            0
+          ]
+        },
+        {
+          "id": "I002",
+          "category": "medical",
+          "status": "resolved",
+          "people": 1,
+          "evacuated_people": 1,
+          "handed_over": true,
+          "required_kinds": [
+            "ambulance"
+          ],
+          "completed_kinds": [
+            "ambulance"
+          ],
+          "wait_reason": null,
+          "uncertain_delivery": false,
+          "resolved_at": 130.75,
+          "position": [
+            304.62,
+            19.89,
+            0
+          ]
+        }
+      ],
+      "metrics": {
+        "fleet": 50,
+        "active_drones": 50,
+        "open_incidents": 0,
+        "resolved_incidents": 2,
+        "available_resources": 5,
+        "handoffs": 2,
+        "supply_drops": 1,
+        "faults": 1,
+        "covered_patches": 24,
+        "total_patches": 25,
+        "simulation_only": true,
+        "external_ground": false,
+        "allocation_mode": "deterministic feasible bids (central simulation harness)"
+      }
+    }
+  ],
+  "profiles": [
+    {
+      "fleet": 100,
+      "workload": "normal scenario coverage and reserve policy",
+      "requested_hz": 10,
+      "frame_budget_ms": 100,
+      "frames": 100,
+      "step": {
+        "mean_ms": 2.028,
+        "p95_ms": 13.153,
+        "max_ms": 13.662
+      },
+      "snapshot_plus_json": {
+        "mean_ms": 4.665,
+        "p95_ms": 5.195,
+        "max_ms": 9.438
+      },
+      "combined": {
+        "mean_ms": 6.693,
+        "p95_ms": 18.131,
+        "max_ms": 18.577
+      },
+      "mean_frame_bytes": 64040,
+      "max_frame_bytes": 64486,
+      "mean_flying_or_working_drones": 25.96,
+      "max_flying_or_working_drones": 26,
+      "mean_airborne_drones": 24.96,
+      "max_airborne_drones": 26,
+      "passed_mean_budget": true,
+      "passed_p95_budget": true,
+      "frames_over_budget": 0,
+      "limitations": "In-process CPU kinematics and serialization only; excludes browser rendering, networking, perception, and hardware flight control."
+    },
+    {
+      "fleet": 100,
+      "workload": "dense coverage stress fixture",
+      "requested_hz": 10,
+      "frame_budget_ms": 100,
+      "frames": 100,
+      "step": {
+        "mean_ms": 27.851,
+        "p95_ms": 141.189,
+        "max_ms": 358.984
+      },
+      "snapshot_plus_json": {
+        "mean_ms": 11.56,
+        "p95_ms": 23.088,
+        "max_ms": 39.877
+      },
+      "combined": {
+        "mean_ms": 39.412,
+        "p95_ms": 149.42,
+        "max_ms": 377.24
+      },
+      "mean_frame_bytes": 84548,
+      "max_frame_bytes": 85146,
+      "mean_flying_or_working_drones": 89.96,
+      "max_flying_or_working_drones": 90,
+      "mean_airborne_drones": 86.4,
+      "max_airborne_drones": 90,
+      "passed_mean_budget": true,
+      "passed_p95_budget": false,
+      "frames_over_budget": 10,
+      "limitations": "In-process CPU kinematics and serialization only; excludes browser rendering, networking, perception, and hardware flight control."
+    }
+  ],
+  "limitations": [
+    "Prescribed synthetic flood corridor and elevated crossings, not hydrodynamics.",
+    "Deterministic simulation harness, not decentralized consensus or certified flight physics.",
+    "Rescue extraction and crew acknowledgment are simulated; transfer routes are executed kinematically."
+  ],
+  "passed": true,
+  "wall_seconds": 149.757,
+  "finished_at": "2026-10-10T08:06:34.792324+00:00",
+  "profile_refreshed_at": "2026-10-10T08:08:38.102253+00:00",
+  "all_profiles_meet_p95_budget": false
+}

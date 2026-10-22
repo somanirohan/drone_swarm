@@ -1,0 +1,43 @@
+digraph DecentralizedAllocation {
+  graph [rankdir=TB, bgcolor="white", pad=0.4, nodesep=0.6, ranksep=0.65, newrank=true, splines=polyline, fontname="Arial", labelloc=t, fontsize=26, fontcolor="#0F172A", label="20 DRONES / NO SINGLE ASSIGNMENT SERVER\n\nShared mission • independent decisions • peer conflict resolution"];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=13, margin="0.22,0.15", width=3.7, height=0.85, color="#CBD5E1", fillcolor="#F8FAFC", fontcolor="#334155", penwidth=1.3];
+  edge [color="#64748B", arrowsize=0.8, penwidth=1.5, fontname="Arial", fontsize=11, fontcolor="#475569"];
+  mission [width=11.5, fillcolor="#F1F5F9", label="ONE COMMON MISSION PACKAGE — copied onto all aircraft before launch\nPermitted boundary + search objective + coordinate frame + task-generation rules + recovery constraints"];
+  subgraph cluster_one {
+    label="DRONE D04"; fontname="Arial"; fontsize=17; fontcolor="#2563EB"; color="#BFDBFE"; style=rounded; margin=18;
+    gen1 [label="GENERATE IDENTIFIABLE WORK\nKnown area → sweep strips\nUnknown interior → sensed frontiers", fillcolor="#EFF6FF"];
+    ledger1 [label="LOCAL TASK + COVERAGE LEDGER\nObserved footprint / freshness\nPartial work + assignment revisions", fillcolor="#EFF6FF"];
+    bid1 [label="LOCAL FEASIBILITY + PEER AUCTION\nCan I search and recover safely?\nBid → resolve conflict → rebuild", fillcolor="#DBEAFE", color="#2563EB"];
+    fly1 [label="LOCAL PLANNER + AUTOPILOT\nExecute next agreed search task\nSense hazards and replan onboard", fillcolor="#F0FDFA", color="#0F766E"];
+    gen1 -> ledger1 -> bid1 -> fly1;
+  }
+  subgraph cluster_two {
+    label="DRONE D11"; fontname="Arial"; fontsize=17; fontcolor="#2563EB"; color="#BFDBFE"; style=rounded; margin=18;
+    gen2 [label="GENERATE IDENTIFIABLE WORK\nSame mission → same strip IDs\nAssociate new sensed frontiers", fillcolor="#EFF6FF"];
+    ledger2 [label="LOCAL TASK + COVERAGE LEDGER\nReplicate useful peer observations\nReject stale state transitions", fillcolor="#EFF6FF"];
+    bid2 [label="LOCAL FEASIBILITY + PEER AUCTION\nInsufficient recovery energy? No bid.\nResolve ties with common ID rule", fillcolor="#DBEAFE", color="#2563EB"];
+    fly2 [label="LOCAL PLANNER + AUTOPILOT\nContinue eligible assigned work\nRecover before energy is exhausted", fillcolor="#F0FDFA", color="#0F766E"];
+    gen2 -> ledger2 -> bid2 -> fly2;
+  }
+  subgraph cluster_three {
+    label="DRONE D18 / SAME STACK ON ALL 20"; fontname="Arial"; fontsize=17; fontcolor="#2563EB"; color="#BFDBFE"; style=rounded; margin=18;
+    gen3 [label="GENERATE IDENTIFIABLE WORK\nDiscover new observations locally\nShare task/map deltas with peers", fillcolor="#EFF6FF"];
+    ledger3 [label="LOCAL TASK + COVERAGE LEDGER\nPersist progress and evidence\nReopen unfinished / uncertain work", fillcolor="#EFF6FF"];
+    bid3 [label="LOCAL FEASIBILITY + PEER AUCTION\nLose T37 to D04 → select other work\nShort task bundles limit churn", fillcolor="#DBEAFE", color="#2563EB"];
+    fly3 [label="LOCAL PLANNER + AUTOPILOT\nAllocation is separate from avoidance\nFlight does not wait for dashboard", fillcolor="#F0FDFA", color="#0F766E"];
+    gen3 -> ledger3 -> bid3 -> fly3;
+  }
+  {rank=same; gen1; gen2; gen3;}
+  {rank=same; ledger1; ledger2; ledger3;}
+  {rank=same; bid1; bid2; bid3;}
+  {rank=same; fly1; fly2; fly3;}
+  mission -> gen1; mission -> gen2; mission -> gen3;
+  bid1 -> bid2 [dir=both, color="#2563EB", penwidth=2, label="peer bids\n+ winner beliefs"];
+  bid2 -> bid3 [dir=both, color="#2563EB", penwidth=2, label="forward valid\nallocation deltas"];
+  policy [width=11.5, fillcolor="#FFFBEB", color="#D97706", label="WHEN THE RADIO NETWORK SPLITS\nContinue previously agreed work • explicitly permit or defer duplicate observation\nExclusive actions require valid authorization; uncertain ownership pauses new execution"];
+  fly1 -> policy [style=invis]; fly2 -> policy [style=invis]; fly3 -> policy [style=invis];
+  example [width=11.5, fillcolor="#F8FAFC", label="T37 EXAMPLE: D04 costs 6 min / D11 fails energy check / D18 costs 8 min → D04 wins after peer reconciliation\nCommon task IDs and comparison rules replace a central dispatcher; network assumptions still matter."];
+  policy -> example [style=invis];
+  footer [shape=plain, width=0, height=0, fontsize=11, fontcolor="#64748B", label="Research-informed proposal: CBAA / CBBA / ACBBA • RACER for unknown-space exploration\nNo fixed 19-left / 1-right split. No cloud or LLM required for individual flight or peer allocation."];
+  example -> footer [style=invis];
+}

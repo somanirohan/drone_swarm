@@ -1,0 +1,146 @@
+{
+  "building-01": {
+    "parts": [
+      {
+        "mesh": "building-01-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Concrete031_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-01-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-01-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      }
+    ],
+    "collision": "building-01-collision.obj",
+    "height": 7.047265112027545
+  },
+  "building-02": {
+    "parts": [
+      {
+        "mesh": "building-02-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Concrete031_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-02-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-02-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      }
+    ],
+    "collision": "building-02-collision.obj",
+    "height": 4.698176681611293
+  },
+  "building-03": {
+    "parts": [
+      {
+        "mesh": "building-03-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Concrete031_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-03-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-03-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-03-3.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/billboards-texture-1024.png"
+      }
+    ],
+    "collision": "building-03-collision.obj",
+    "height": 5.201690421950765
+  },
+  "building-04": {
+    "parts": [
+      {
+        "mesh": "building-04-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Concrete026_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-04-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-04-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      }
+    ],
+    "collision": "building-04-collision.obj",
+    "height": 5.705724900955324
+  },
+  "building-05": {
+    "parts": [
+      {
+        "mesh": "building-05-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Concrete026_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-05-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-05-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      }
+    ],
+    "collision": "building-05-collision.obj",
+    "height": 5.933267702740947
+  },
+  "building-06": {
+    "parts": [
+      {
+        "mesh": "building-06-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-06-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-06-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-06-3.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/billboards-texture-1024.png"
+      }
+    ],
+    "collision": "building-06-collision.obj",
+    "height": 4.715115737915038
+  },
+  "building-07": {
+    "parts": [
+      {
+        "mesh": "building-07-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Concrete031_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-07-1.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Facade001_1K_Color.jpg"
+      },
+      {
+        "mesh": "building-07-2.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rust006_1K_Color.jpg"
+      }
+    ],
+    "collision": "building-07-collision.obj",
+    "height": 8.462399483496124
+  },
+  "wreckage-3-types": {
+    "parts": [
+      {
+        "mesh": "wreckage-3-types-0.obj",
+        "texture": "assets/legacy/apocalyptic-city/LowPoly-Apocalyptic-Buildings-By-Majadroid/textures/Rocks007_1K_Color.jpg"
+      }
+    ],
+    "collision": "wreckage-3-types-collision.obj",
+    "height": 0.7562838070406558
+  }
+}

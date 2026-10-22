@@ -1,0 +1,19 @@
+digraph Lifecycle {
+  graph [rankdir=TB, bgcolor="#f8fafc", fontname="Arial", fontsize=20, pad=0.4, nodesep=0.4, ranksep=0.45, label="OBSERVATION TO CONFIRMED OUTCOME\nCommands, evidence and failures have separate states", labelloc=t];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=12, margin="0.18,0.12", color="#cbd5e1", fillcolor="white"];
+  edge [fontname="Arial", fontsize=10, color="#64748b"];
+  observe [label="Aircraft records candidate observation\nTime, position uncertainty, confidence, evidence", fillcolor="#ede9fe"];
+  triage [label="DisruptionOps intake + corroboration\nDeduplicate; assess need; preserve uncertainty", fillcolor="#dbeafe"];
+  auth [label="Mission proposal + authority check\nCapability, polygon, constraints, expiry", fillcolor="#dbeafe"];
+  assign [label="Field allocator checks feasibility\nEnergy to task + work + recovery + reserve\nTask ownership + airspace + pad slots", fillcolor="#ccfbf1"];
+  command [label="Durable command + acknowledgment\nID, assignment generation, expiry\nReceived / accepted / rejected", fillcolor="#ccfbf1"];
+  execute [label="Onboard mission executes locally\nProgress + measured health + contingencies", fillcolor="#ede9fe"];
+  outcome [label="Confirm actual result\nObservation / package receipt / crew extraction\nThese are different outcomes", fillcolor="#dbeafe"];
+  replay [label="Offline? Journal locally\nReplay observations on reconnect\nReject expired / superseded commands", fillcolor="#fef3c7"];
+  missing [label="Missing / failed aircraft\nUnreachable is not confirmed crash\nRetain uncertain assignment and delivery state", fillcolor="#fee2e2"];
+  verify [label="Establish safe reassignment\nConfirm release or validated quiescence\nOtherwise hold conflicting work", fillcolor="#fee2e2"];
+  observe -> triage -> auth -> assign -> command -> execute -> outcome;
+  observe -> replay [style=dashed]; replay -> triage [label="delayed event", style=dashed];
+  execute -> missing [label="lost status / fault"];
+  missing -> verify -> assign [label="remaining feasible work", constraint=false];
+}

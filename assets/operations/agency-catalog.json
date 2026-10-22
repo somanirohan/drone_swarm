@@ -1,0 +1,930 @@
+{
+ "source": "DisruptionOps backend/migrations/029_pcmc_pccoe_zone.sql @ f7ca6d8321b9be73f903defa3258d72557a31ce1 (read-only; DisruptionOps not modified or contacted)",
+ "anchor": {
+  "lat": 18.6526632,
+  "lng": 73.7624378,
+  "note": "PCCOE, Akurdi-Nigdi; same point as the simulator map anchor"
+ },
+ "map_half_extent_m": 600,
+ "note": "local_xy = metres east/north of the anchor. Units with on_map=false start outside the 1.2 km simulated district: the engine must bring them in from the map edge with the extra real travel time (distance_from_anchor_m), not teleport them onto a road.",
+ "agencies": [
+  {
+   "id": "pcmc",
+   "name": "Pimpri Chinchwad Municipal Corporation"
+  },
+  {
+   "id": "pcmcfire",
+   "name": "PCMC Fire Brigade"
+  }
+ ],
+ "wards": [
+  {
+   "source_id": "w-pc-01",
+   "number": "P01",
+   "name": "Akurdi–Pradhikaran (PCCOE)",
+   "lng": 73.7624,
+   "lat": 18.6527,
+   "population": 64000,
+   "local_xy": [
+    -4.0,
+    4.1
+   ]
+  },
+  {
+   "source_id": "w-pc-02",
+   "number": "P02",
+   "name": "Nigdi",
+   "lng": 73.7773,
+   "lat": 18.6598,
+   "population": 71000,
+   "local_xy": [
+    1569.4,
+    789.1
+   ]
+  },
+  {
+   "source_id": "w-pc-03",
+   "number": "P03",
+   "name": "Ravet (Pawana bank)",
+   "lng": 73.7451,
+   "lat": 18.6433,
+   "population": 58000,
+   "local_xy": [
+    -1830.9,
+    -1035.3
+   ]
+  },
+  {
+   "source_id": "w-pc-04",
+   "number": "P04",
+   "name": "Tathawade–Punawale",
+   "lng": 73.7502,
+   "lat": 18.6154,
+   "population": 62000,
+   "local_xy": [
+    -1292.3,
+    -4120.2
+   ]
+  },
+  {
+   "source_id": "w-pc-05",
+   "number": "P05",
+   "name": "Chinchwad Gaon–Walhekarwadi",
+   "lng": 73.7804,
+   "lat": 18.6294,
+   "population": 83000,
+   "local_xy": [
+    1896.8,
+    -2572.2
+   ]
+  },
+  {
+   "source_id": "w-pc-06",
+   "number": "P06",
+   "name": "Chinchwad Station",
+   "lng": 73.7915,
+   "lat": 18.6395,
+   "population": 76000,
+   "local_xy": [
+    3069.0,
+    -1455.5
+   ]
+  },
+  {
+   "source_id": "w-pc-07",
+   "number": "P07",
+   "name": "Pimpri",
+   "lng": 73.8025,
+   "lat": 18.623,
+   "population": 92000,
+   "local_xy": [
+    4230.6,
+    -3279.9
+   ]
+  },
+  {
+   "source_id": "w-pc-08",
+   "number": "P08",
+   "name": "Thergaon",
+   "lng": 73.7729,
+   "lat": 18.6093,
+   "population": 69000,
+   "local_xy": [
+    1104.8,
+    -4794.7
+   ]
+  },
+  {
+   "source_id": "w-pc-09",
+   "number": "P09",
+   "name": "Wakad",
+   "lng": 73.7644,
+   "lat": 18.6022,
+   "population": 88000,
+   "local_xy": [
+    207.2,
+    -5579.7
+   ]
+  },
+  {
+   "source_id": "w-pc-10",
+   "number": "P10",
+   "name": "Kasarwadi",
+   "lng": 73.8209,
+   "lat": 18.6081,
+   "population": 54000,
+   "local_xy": [
+    6173.6,
+    -4927.4
+   ]
+  },
+  {
+   "source_id": "w-pc-11",
+   "number": "P11",
+   "name": "Chikhli–MIDC",
+   "lng": 73.818,
+   "lat": 18.67,
+   "population": 74000,
+   "local_xy": [
+    5867.4,
+    1916.9
+   ]
+  },
+  {
+   "source_id": "w-pc-12",
+   "number": "P12",
+   "name": "Dehu Road–Kiwale",
+   "lng": 73.7343,
+   "lat": 18.68,
+   "population": 46000,
+   "local_xy": [
+    -2971.4,
+    3022.6
+   ]
+  },
+  {
+   "source_id": "w-pc-13",
+   "number": "P13",
+   "name": "Talawade",
+   "lng": 73.7908,
+   "lat": 18.6987,
+   "population": 38000,
+   "local_xy": [
+    2995.0,
+    5090.3
+   ]
+  },
+  {
+   "source_id": "w-pc-14",
+   "number": "P14",
+   "name": "Pimple Saudagar",
+   "lng": 73.7978,
+   "lat": 18.5982,
+   "population": 79000,
+   "local_xy": [
+    3734.2,
+    -6022.0
+   ]
+  }
+ ],
+ "resources": [
+  {
+   "source_id": "PC-FIRE-01",
+   "kind": "fire_engine",
+   "name": "Fire tender 01 (Pradhikaran stn, Nigdi)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 6,
+   "lng": 73.77174,
+   "lat": 18.65925,
+   "local_xy": [
+    982.3,
+    728.3
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1223
+  },
+  {
+   "source_id": "PC-FIRE-02",
+   "kind": "fire_engine",
+   "name": "Fire tender 02 (Pradhikaran stn, Nigdi)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 6,
+   "lng": 73.7718,
+   "lat": 18.6593,
+   "local_xy": [
+    988.6,
+    733.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1231
+  },
+  {
+   "source_id": "PC-FIRE-03",
+   "kind": "fire_engine",
+   "name": "Fire tender 03 (Main PCMC stn, Pimpri)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 6,
+   "lng": 73.81805,
+   "lat": 18.62276,
+   "local_xy": [
+    5872.6,
+    -3306.4
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 6739
+  },
+  {
+   "source_id": "PC-FIRE-04",
+   "kind": "fire_engine",
+   "name": "Hydraulic platform 04 (Main PCMC stn)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 4,
+   "lng": 73.8181,
+   "lat": 18.6228,
+   "local_xy": [
+    5877.9,
+    -3302.0
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 6742
+  },
+  {
+   "source_id": "PC-FIRE-05",
+   "kind": "fire_engine",
+   "name": "Fire tender 05 (Thergaon stn)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 6,
+   "lng": 73.77881,
+   "lat": 18.61219,
+   "local_xy": [
+    1728.9,
+    -4475.1
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 4797
+  },
+  {
+   "source_id": "PC-FIRE-06",
+   "kind": "fire_engine",
+   "name": "Fire tender 06 (Rahatani stn)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 6,
+   "lng": 73.78172,
+   "lat": 18.59624,
+   "local_xy": [
+    2036.2,
+    -6238.7
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 6563
+  },
+  {
+   "source_id": "PC-FIRE-07",
+   "kind": "fire_engine",
+   "name": "Foam tender 07 (Chikhali stn, MIDC)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 6,
+   "lng": 73.8178,
+   "lat": 18.66441,
+   "local_xy": [
+    5846.2,
+    1298.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 5989
+  },
+  {
+   "source_id": "PC-AMB-01",
+   "kind": "ambulance",
+   "name": "108 Ambulance 01 (YCM Hospital)",
+   "operator": "108 EMS",
+   "agency_id": "health",
+   "capacity": 4,
+   "lng": 73.82116,
+   "lat": 18.62203,
+   "local_xy": [
+    6201.1,
+    -3387.1
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 7066
+  },
+  {
+   "source_id": "PC-AMB-02",
+   "kind": "ambulance",
+   "name": "108 Ambulance 02 (YCM Hospital)",
+   "operator": "108 EMS",
+   "agency_id": "health",
+   "capacity": 4,
+   "lng": 73.8212,
+   "lat": 18.6221,
+   "local_xy": [
+    6205.3,
+    -3379.4
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 7066
+  },
+  {
+   "source_id": "PC-AMB-03",
+   "kind": "ambulance",
+   "name": "Ambulance 03 (Aditya Birla Hospital)",
+   "operator": "Hospital fleet",
+   "agency_id": "health",
+   "capacity": 3,
+   "lng": 73.77499,
+   "lat": 18.62584,
+   "local_xy": [
+    1325.5,
+    -2965.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3249
+  },
+  {
+   "source_id": "PC-AMB-04",
+   "kind": "ambulance",
+   "name": "Ambulance 04 (Lokmanya Hospital, Nigdi)",
+   "operator": "Hospital fleet",
+   "agency_id": "health",
+   "capacity": 3,
+   "lng": 73.7732,
+   "lat": 18.65618,
+   "local_xy": [
+    1136.5,
+    388.9
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1201
+  },
+  {
+   "source_id": "PC-AMB-05",
+   "kind": "ambulance",
+   "name": "Ambulance 05 (D Y Patil Hospital)",
+   "operator": "Hospital fleet",
+   "agency_id": "health",
+   "capacity": 3,
+   "lng": 73.82197,
+   "lat": 18.62317,
+   "local_xy": [
+    6286.6,
+    -3261.1
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 7082
+  },
+  {
+   "source_id": "PC-AMB-06",
+   "kind": "ambulance",
+   "name": "Ambulance 06 (Global Hospital, Ravet)",
+   "operator": "Hospital fleet",
+   "agency_id": "health",
+   "capacity": 3,
+   "lng": 73.75716,
+   "lat": 18.64646,
+   "local_xy": [
+    -557.3,
+    -685.9
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 884
+  },
+  {
+   "source_id": "PC-BOAT-01",
+   "kind": "boat",
+   "name": "Rescue boat 01 (Pawana, Ravet)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 8,
+   "lng": 73.7456,
+   "lat": 18.6438,
+   "local_xy": [
+    -1778.1,
+    -980.0
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 2030
+  },
+  {
+   "source_id": "PC-BOAT-02",
+   "kind": "boat",
+   "name": "Rescue boat 02 (Pawana, Morya Gosavi ghat)",
+   "operator": "PCMC Fire Brigade",
+   "agency_id": "pcmcfire",
+   "capacity": 8,
+   "lng": 73.77844,
+   "lat": 18.62632,
+   "local_xy": [
+    1689.8,
+    -2912.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3367
+  },
+  {
+   "source_id": "PC-BOAT-03",
+   "kind": "boat",
+   "name": "Inflatable boat 03 (SDRF, Pimpri)",
+   "operator": "SDRF Maharashtra",
+   "agency_id": "sdrf",
+   "capacity": 6,
+   "lng": 73.8025,
+   "lat": 18.623,
+   "local_xy": [
+    4230.6,
+    -3279.9
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 5353
+  },
+  {
+   "source_id": "PC-TEAM-01",
+   "kind": "rescue_team",
+   "name": "PCMC disaster cell team 01 (Pimpri)",
+   "operator": "PCMC Disaster Cell",
+   "agency_id": "pcmc",
+   "capacity": 15,
+   "lng": 73.818,
+   "lat": 18.6227,
+   "local_xy": [
+    5867.4,
+    -3313.0
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 6738
+  },
+  {
+   "source_id": "PC-TEAM-02",
+   "kind": "rescue_team",
+   "name": "SDRF team 02 (Nigdi)",
+   "operator": "SDRF Maharashtra",
+   "agency_id": "sdrf",
+   "capacity": 20,
+   "lng": 73.7717,
+   "lat": 18.6592,
+   "local_xy": [
+    978.1,
+    722.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1216
+  },
+  {
+   "source_id": "PC-TEAM-03",
+   "kind": "rescue_team",
+   "name": "Civil Defence team 03 (Chinchwad)",
+   "operator": "PCMC Disaster Cell",
+   "agency_id": "pcmc",
+   "capacity": 12,
+   "lng": 73.7915,
+   "lat": 18.6395,
+   "local_xy": [
+    3069.0,
+    -1455.5
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3397
+  },
+  {
+   "source_id": "PC-PUMP-01",
+   "kind": "pump",
+   "name": "Dewatering pump 01 (Akurdi station underpass)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.76535,
+   "lat": 18.64899,
+   "local_xy": [
+    307.5,
+    -406.1
+   ],
+   "on_map": true,
+   "distance_from_anchor_m": 509
+  },
+  {
+   "source_id": "PC-PUMP-02",
+   "kind": "pump",
+   "name": "Dewatering pump 02 (Chinchwad station)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.7915,
+   "lat": 18.63948,
+   "local_xy": [
+    3069.0,
+    -1457.7
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3398
+  },
+  {
+   "source_id": "PC-PUMP-03",
+   "kind": "pump",
+   "name": "Dewatering pump 03 (Pimpri station)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.80251,
+   "lat": 18.62295,
+   "local_xy": [
+    4231.6,
+    -3285.4
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 5357
+  },
+  {
+   "source_id": "PC-PUMP-04",
+   "kind": "pump",
+   "name": "Dewatering pump 04 (Ravet)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.74506,
+   "lat": 18.64327,
+   "local_xy": [
+    -1835.1,
+    -1038.6
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 2109
+  },
+  {
+   "source_id": "PC-PUMP-05",
+   "kind": "pump",
+   "name": "Dewatering pump 05 (Kasarwadi)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.82087,
+   "lat": 18.60809,
+   "local_xy": [
+    6170.4,
+    -4928.5
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 7897
+  },
+  {
+   "source_id": "PC-JCB-01",
+   "kind": "jcb",
+   "name": "JCB 01 (PCMC Works, Nigdi)",
+   "operator": "PCMC Works",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.77063,
+   "lat": 18.66526,
+   "local_xy": [
+    865.1,
+    1392.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1640
+  },
+  {
+   "source_id": "PC-JCB-02",
+   "kind": "jcb",
+   "name": "JCB 02 (PCMC Works, Thergaon)",
+   "operator": "PCMC Works",
+   "agency_id": "pcmc",
+   "capacity": 1,
+   "lng": 73.7729,
+   "lat": 18.6093,
+   "local_xy": [
+    1104.8,
+    -4794.7
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 4920
+  },
+  {
+   "source_id": "PC-TANK-01",
+   "kind": "water_tanker",
+   "name": "Water tanker 01 (Nigdi)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 10000,
+   "lng": 73.7706,
+   "lat": 18.6652,
+   "local_xy": [
+    861.9,
+    1386.2
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1632
+  },
+  {
+   "source_id": "PC-TANK-02",
+   "kind": "water_tanker",
+   "name": "Water tanker 02 (Pimpri)",
+   "operator": "PCMC Water Supply",
+   "agency_id": "pcmc",
+   "capacity": 10000,
+   "lng": 73.8026,
+   "lat": 18.6229,
+   "local_xy": [
+    4241.1,
+    -3290.9
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 5368
+  },
+  {
+   "source_id": "PC-TRUCK-01",
+   "kind": "supply_truck",
+   "name": "Relief truck 01 (PCCOE staging)",
+   "operator": "PCMC Disaster Cell",
+   "agency_id": "pcmc",
+   "capacity": 400,
+   "lng": 73.76238,
+   "lat": 18.65267,
+   "local_xy": [
+    -6.1,
+    0.8
+   ],
+   "on_map": true,
+   "distance_from_anchor_m": 6
+  },
+  {
+   "source_id": "PC-TRUCK-02",
+   "kind": "supply_truck",
+   "name": "Relief truck 02 (Chinchwad)",
+   "operator": "PCMC Disaster Cell",
+   "agency_id": "pcmc",
+   "capacity": 400,
+   "lng": 73.7804,
+   "lat": 18.6294,
+   "local_xy": [
+    1896.8,
+    -2572.2
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3196
+  },
+  {
+   "source_id": "PC-BUS-01",
+   "kind": "bus",
+   "name": "Evacuation bus 01 (Bhakti Shakti depot)",
+   "operator": "PMPML",
+   "agency_id": "transport",
+   "capacity": 45,
+   "lng": 73.77063,
+   "lat": 18.66526,
+   "local_xy": [
+    865.1,
+    1392.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1640
+  },
+  {
+   "source_id": "PC-BUS-02",
+   "kind": "bus",
+   "name": "Evacuation bus 02 (Bhakti Shakti depot)",
+   "operator": "PMPML",
+   "agency_id": "transport",
+   "capacity": 45,
+   "lng": 73.7707,
+   "lat": 18.6653,
+   "local_xy": [
+    872.5,
+    1397.3
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1647
+  }
+ ],
+ "lifelines": [
+  {
+   "source_id": "lf-pc-h1",
+   "kind": "hospital",
+   "name": "YCM Hospital (PCMC), Pimpri",
+   "capacity": null,
+   "lng": 73.82116,
+   "lat": 18.62203,
+   "local_xy": [
+    6201.1,
+    -3387.1
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 7066
+  },
+  {
+   "source_id": "lf-pc-h2",
+   "kind": "hospital",
+   "name": "Aditya Birla Memorial Hospital, Thergaon",
+   "capacity": null,
+   "lng": 73.77499,
+   "lat": 18.62584,
+   "local_xy": [
+    1325.5,
+    -2965.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3249
+  },
+  {
+   "source_id": "lf-pc-h3",
+   "kind": "hospital",
+   "name": "Lokmanya Hospital, Nigdi",
+   "capacity": null,
+   "lng": 73.7732,
+   "lat": 18.65618,
+   "local_xy": [
+    1136.5,
+    388.9
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1201
+  },
+  {
+   "source_id": "lf-pc-h4",
+   "kind": "hospital",
+   "name": "Dr D Y Patil Hospital, Pimpri",
+   "capacity": null,
+   "lng": 73.82197,
+   "lat": 18.62317,
+   "local_xy": [
+    6286.6,
+    -3261.1
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 7082
+  },
+  {
+   "source_id": "lf-pc-h5",
+   "kind": "hospital",
+   "name": "Global Hospital, Ravet",
+   "capacity": null,
+   "lng": 73.75716,
+   "lat": 18.64646,
+   "local_xy": [
+    -557.3,
+    -685.9
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 884
+  },
+  {
+   "source_id": "lf-pc-h6",
+   "kind": "hospital",
+   "name": "Thergaon Hospital (PCMC)",
+   "capacity": null,
+   "lng": 73.78166,
+   "lat": 18.61338,
+   "local_xy": [
+    2029.9,
+    -4343.5
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 4794
+  },
+  {
+   "source_id": "lf-pc-s1",
+   "kind": "shelter",
+   "name": "PCCOE campus, Nigdi (shelter & relief staging)",
+   "capacity": 800,
+   "lng": 73.76238,
+   "lat": 18.65267,
+   "local_xy": [
+    -6.1,
+    0.8
+   ],
+   "on_map": true,
+   "distance_from_anchor_m": 6
+  },
+  {
+   "source_id": "lf-pc-s2",
+   "kind": "shelter",
+   "name": "Jnana Prabodhini ground, Nigdi",
+   "capacity": 400,
+   "lng": 73.76625,
+   "lat": 18.65879,
+   "local_xy": [
+    402.6,
+    677.4
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 788
+  },
+  {
+   "source_id": "lf-pc-s3",
+   "kind": "shelter",
+   "name": "S B Patil Public School, Ravet",
+   "capacity": 450,
+   "lng": 73.74602,
+   "lat": 18.65596,
+   "local_xy": [
+    -1733.7,
+    364.5
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1772
+  },
+  {
+   "source_id": "lf-pc-s4",
+   "kind": "shelter",
+   "name": "Kamalnayan Bajaj High School, More Wasti",
+   "capacity": 400,
+   "lng": 73.79867,
+   "lat": 18.65895,
+   "local_xy": [
+    3826.1,
+    695.1
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3889
+  },
+  {
+   "source_id": "lf-pc-s5",
+   "kind": "shelter",
+   "name": "St Ursula's High School, Nigdi",
+   "capacity": 350,
+   "lng": 73.77732,
+   "lat": 18.65712,
+   "local_xy": [
+    1571.6,
+    492.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1647
+  },
+  {
+   "source_id": "lf-pc-s6",
+   "kind": "shelter",
+   "name": "Mhalsakant School, Akurdi",
+   "capacity": 350,
+   "lng": 73.77545,
+   "lat": 18.64839,
+   "local_xy": [
+    1374.1,
+    -472.5
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1453
+  },
+  {
+   "source_id": "lf-pc-r1",
+   "kind": "relief_centre",
+   "name": "Morya Gosavi temple relief centre, Chinchwad",
+   "capacity": 1000,
+   "lng": 73.77844,
+   "lat": 18.62632,
+   "local_xy": [
+    1689.8,
+    -2912.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 3367
+  },
+  {
+   "source_id": "lf-pc-r2",
+   "kind": "relief_centre",
+   "name": "Ravet relief camp (D Y Patil Dnyanshanti School)",
+   "capacity": 900,
+   "lng": 73.75948,
+   "lat": 18.64756,
+   "local_xy": [
+    -312.3,
+    -564.3
+   ],
+   "on_map": true,
+   "distance_from_anchor_m": 645
+  },
+  {
+   "source_id": "lf-pc-m1",
+   "kind": "medical_camp",
+   "name": "Medical camp, Ravet",
+   "capacity": 120,
+   "lng": 73.746,
+   "lat": 18.6442,
+   "local_xy": [
+    -1735.8,
+    -935.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1972
+  },
+  {
+   "source_id": "lf-pc-p1",
+   "kind": "water_point",
+   "name": "Water point, Bhakti Shakti depot",
+   "capacity": null,
+   "lng": 73.77063,
+   "lat": 18.66526,
+   "local_xy": [
+    865.1,
+    1392.8
+   ],
+   "on_map": false,
+   "distance_from_anchor_m": 1640
+  }
+ ]
+}

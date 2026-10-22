@@ -1,0 +1,21 @@
+digraph Deployment {
+  graph [rankdir=TB, bgcolor="#f8fafc", fontname="Arial", fontsize=20, pad=0.4, nodesep=0.25, ranksep=0.55, label="HYPOTHETICAL ASSAM FLOOD DEPLOYMENT\n100-aircraft example; use 10 per cell for a 50-aircraft fleet", labelloc=t];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11, margin="0.15,0.12", fillcolor="white", color="#cbd5e1"];
+  edge [fontname="Arial", fontsize=10, color="#64748b"];
+  district [label="District incident coordination / DisruptionOps\nPriorities, permissions, shared airspace and rescue teams", fillcolor="#dbeafe"];
+  a [label="BASE A + EDGE\nSector A\n20 aircraft", fillcolor="#ccfbf1"];
+  b [label="BASE B + EDGE\nSector B\n20 aircraft", fillcolor="#ccfbf1"];
+  c [label="BASE C + EDGE\nSector C\n20 aircraft", fillcolor="#ccfbf1"];
+  d [label="BASE D + EDGE\nSector D\n20 aircraft", fillcolor="#ccfbf1"];
+  e [label="BASE E + EDGE\nSector E\n20 aircraft", fillcolor="#ccfbf1"];
+  {rank=same; a; b; c; d; e;}
+  district -> {a b c d e} [dir=both, label="missions / events", style=dashed];
+  roles [label="Example per 20-aircraft cell\n10 search + 4 verification + 2 delivery + 1 relay + 3 reserve\nCapabilities depend on the actual aircraft and payload", fillcolor="#e0f2fe"];
+  a -> roles; b -> roles; c -> roles; d -> roles; e -> roles;
+  launch [label="INSPECT / LOAD / ASSIGN\nEnergy feasibility + authorized flight volume", fillcolor="#fef3c7"];
+  sortie [label="SORTIE\nSearch, verify or approved delivery\nLocal sensing and contingency", fillcolor="#ede9fe"];
+  recovery [label="RECOVER / CONFIRM OUTCOME\nPad slot + alternate landing\nBattery swap, cooling and maintenance", fillcolor="#fef3c7"];
+  roles -> launch; launch -> sortie; sortie -> recovery; recovery -> launch [label="rotate", constraint=false];
+  ground [label="GROUND RESPONDERS\nBoats and crews confirm extraction\nSupply delivery is a separate outcome", fillcolor="#dbeafe"];
+  sortie -> ground [label="verified incident / evidence"];
+}

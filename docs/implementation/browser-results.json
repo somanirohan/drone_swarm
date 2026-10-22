@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "fleet": 50,
+  "frames": 108,
+  "checks": [
+    "all scenarios",
+    "concurrent ground dispatch",
+    "random seed/run",
+    "pause/resume",
+    "coverage/routes",
+    "selection/cameras",
+    "crash reassignment",
+    "offline controls/reconnect",
+    "desktop/mobile layout"
+  ],
+  "javascript_errors": []
+}

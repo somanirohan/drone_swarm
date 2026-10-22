@@ -1,0 +1,1351 @@
+{
+ "source": {
+  "repo": "https://github.com/officialayush23/DisruptionOps",
+  "commit": "f7ca6d8321b9be73f903defa3258d72557a31ce1",
+  "migrations": "001_portability_taxonomy_as_data.sql..038_agency_replies.sql",
+  "migration_count": 38,
+  "migrations_sha256": "bac027c276cb5de015b3aa87e96ca7e981ae805356317d97508079483c44d8a4",
+  "note": "Derived read-only from DisruptionOps backend/migrations; regenerate with tools/build_taxonomy.py."
+ },
+ "hazard_types": [
+  {
+   "id": "flood",
+   "display_name": "Flood",
+   "sort_order": 10
+  },
+  {
+   "id": "heat",
+   "display_name": "Heatwave",
+   "sort_order": 20
+  },
+  {
+   "id": "fire",
+   "display_name": "Wildfire",
+   "sort_order": 30
+  },
+  {
+   "id": "air",
+   "display_name": "Air Quality",
+   "sort_order": 40
+  },
+  {
+   "id": "seismic",
+   "display_name": "Seismic",
+   "sort_order": 50
+  }
+ ],
+ "capabilities": [
+  {
+   "id": "water_rescue",
+   "label": "Water rescue",
+   "description": "Reaching and extracting people from standing or moving water"
+  },
+  {
+   "id": "dewatering",
+   "label": "Dewatering",
+   "description": "Removing standing water from streets, basements, underpasses"
+  },
+  {
+   "id": "medical_transport",
+   "label": "Medical transport",
+   "description": "Moving casualties to a medical facility"
+  },
+  {
+   "id": "medical_care",
+   "label": "On-site medical care",
+   "description": "Treating casualties where they are"
+  },
+  {
+   "id": "mass_transport",
+   "label": "Mass transport",
+   "description": "Moving large numbers of people to shelter"
+  },
+  {
+   "id": "debris_clearance",
+   "label": "Debris clearance",
+   "description": "Clearing trees, rubble and blockages from routes"
+  },
+  {
+   "id": "fire_suppression",
+   "label": "Fire suppression",
+   "description": "Extinguishing and containing fire"
+  },
+  {
+   "id": "search_rescue",
+   "label": "Search and rescue",
+   "description": "Locating and extracting trapped people"
+  },
+  {
+   "id": "supply_delivery",
+   "label": "Relief supply delivery",
+   "description": "Moving food, water and medical stock to a distribution point."
+  },
+  {
+   "id": "water_supply",
+   "label": "Drinking water supply",
+   "description": "Delivering potable water in bulk to a point of distribution."
+  },
+  {
+   "id": "field_assessment",
+   "label": "Go and assess",
+   "description": "Send a first responder to see what an unclassified report actually is."
+  },
+  {
+   "id": "traffic_control",
+   "label": "Traffic control",
+   "description": "Cordons, diversions and keeping a scene reachable for the other units"
+  }
+ ],
+ "resource_kinds": [
+  {
+   "id": "boat",
+   "display_name": "Rescue boat",
+   "default_capacity": 6,
+   "capabilities": {
+    "water_rescue": 1.0,
+    "search_rescue": 0.7,
+    "field_assessment": 0.6
+   }
+  },
+  {
+   "id": "pump",
+   "display_name": "Dewatering pump",
+   "default_capacity": 1,
+   "capabilities": {
+    "dewatering": 1.0
+   }
+  },
+  {
+   "id": "ambulance",
+   "display_name": "Ambulance",
+   "default_capacity": 4,
+   "capabilities": {
+    "medical_transport": 1.0,
+    "medical_care": 0.7,
+    "field_assessment": 0.8
+   }
+  },
+  {
+   "id": "fire_engine",
+   "display_name": "Fire engine",
+   "default_capacity": 6,
+   "capabilities": {
+    "fire_suppression": 1.0,
+    "dewatering": 0.5,
+    "water_rescue": 0.6,
+    "field_assessment": 0.8
+   }
+  },
+  {
+   "id": "rescue_team",
+   "display_name": "Rescue team",
+   "default_capacity": 8,
+   "capabilities": {
+    "search_rescue": 1.0,
+    "water_rescue": 0.8,
+    "debris_clearance": 0.6,
+    "field_assessment": 1.0
+   }
+  },
+  {
+   "id": "bus",
+   "display_name": "Bus",
+   "default_capacity": 40,
+   "capabilities": {
+    "mass_transport": 1.0,
+    "supply_delivery": 0.45
+   }
+  },
+  {
+   "id": "jcb",
+   "display_name": "Earthmover",
+   "default_capacity": 1,
+   "capabilities": {
+    "debris_clearance": 1.0
+   }
+  },
+  {
+   "id": "supply_truck",
+   "display_name": "Relief supply truck",
+   "default_capacity": 400,
+   "capabilities": {
+    "supply_delivery": 1.0,
+    "mass_transport": 0.4
+   }
+  },
+  {
+   "id": "water_tanker",
+   "display_name": "Water tanker",
+   "default_capacity": 10000,
+   "capabilities": {
+    "water_supply": 1.0,
+    "supply_delivery": 0.6
+   }
+  },
+  {
+   "id": "police",
+   "display_name": "Police vehicle",
+   "default_capacity": 4,
+   "capabilities": {
+    "traffic_control": 1.0,
+    "field_assessment": 0.8
+   }
+  },
+  {
+   "id": "helicopter",
+   "display_name": "Helicopter",
+   "default_capacity": 6,
+   "capabilities": {
+    "water_rescue": 0.9,
+    "search_rescue": 0.8,
+    "medical_transport": 0.7,
+    "supply_delivery": 0.5
+   }
+  }
+ ],
+ "incident_categories": [
+  {
+   "id": "flooded_road",
+   "display_name": "Flooded road",
+   "hazard_id": "flood",
+   "dedup_radius_m": 300,
+   "dedup_window_min": 45,
+   "base_severity": 3,
+   "life_safety": false,
+   "needs": {
+    "dewatering": 1
+   },
+   "keywords": [
+    {
+     "phrase": "road",
+     "weight": 1.0
+    },
+    {
+     "phrase": "street",
+     "weight": 1.0
+    },
+    {
+     "phrase": "lane",
+     "weight": 1.0
+    },
+    {
+     "phrase": "highway",
+     "weight": 1.0
+    },
+    {
+     "phrase": "bridge",
+     "weight": 1.0
+    },
+    {
+     "phrase": "underpass",
+     "weight": 1.0
+    },
+    {
+     "phrase": "flooded",
+     "weight": 1.0
+    },
+    {
+     "phrase": "water on",
+     "weight": 1.0
+    },
+    {
+     "phrase": "under water",
+     "weight": 1.0
+    },
+    {
+     "phrase": "knee deep",
+     "weight": 1.0
+    },
+    {
+     "phrase": "cannot cross",
+     "weight": 1.0
+    },
+    {
+     "phrase": "cant cross",
+     "weight": 1.0
+    },
+    {
+     "phrase": "रस्ता",
+     "weight": 1.0
+    },
+    {
+     "phrase": "रास्ता",
+     "weight": 1.0
+    },
+    {
+     "phrase": "पूल",
+     "weight": 1.0
+    },
+    {
+     "phrase": "waterlogged road",
+     "weight": 1.0
+    },
+    {
+     "phrase": "submerged",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "waterlogging",
+   "display_name": "Waterlogging",
+   "hazard_id": "flood",
+   "dedup_radius_m": 350,
+   "dedup_window_min": 60,
+   "base_severity": 2,
+   "life_safety": false,
+   "needs": {
+    "dewatering": 1
+   },
+   "keywords": [
+    {
+     "phrase": "waterlogg",
+     "weight": 1.0
+    },
+    {
+     "phrase": "water logged",
+     "weight": 1.0
+    },
+    {
+     "phrase": "water collected",
+     "weight": 1.0
+    },
+    {
+     "phrase": "standing water",
+     "weight": 1.0
+    },
+    {
+     "phrase": "water outside",
+     "weight": 1.0
+    },
+    {
+     "phrase": "basement",
+     "weight": 1.0
+    },
+    {
+     "phrase": "साचले",
+     "weight": 1.0
+    },
+    {
+     "phrase": "जमा",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "fallen_tree",
+   "display_name": "Fallen tree",
+   "hazard_id": "flood",
+   "dedup_radius_m": 120,
+   "dedup_window_min": 90,
+   "base_severity": 2,
+   "life_safety": false,
+   "needs": {
+    "debris_clearance": 1
+   },
+   "keywords": [
+    {
+     "phrase": "tree",
+     "weight": 1.0
+    },
+    {
+     "phrase": "branch",
+     "weight": 1.0
+    },
+    {
+     "phrase": "uprooted",
+     "weight": 1.0
+    },
+    {
+     "phrase": "झाड",
+     "weight": 1.0
+    },
+    {
+     "phrase": "पेड",
+     "weight": 1.0
+    },
+    {
+     "phrase": "fallen tree",
+     "weight": 1.0
+    },
+    {
+     "phrase": "tree fell",
+     "weight": 1.0
+    },
+    {
+     "phrase": "tree down",
+     "weight": 1.0
+    },
+    {
+     "phrase": "tree has fallen",
+     "weight": 1.0
+    },
+    {
+     "phrase": "झाड पडले",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "blocked_drain",
+   "display_name": "Blocked drain",
+   "hazard_id": "flood",
+   "dedup_radius_m": 150,
+   "dedup_window_min": 120,
+   "base_severity": 2,
+   "life_safety": false,
+   "needs": {
+    "dewatering": 1
+   },
+   "keywords": [
+    {
+     "phrase": "drain",
+     "weight": 1.0
+    },
+    {
+     "phrase": "sewer",
+     "weight": 1.0
+    },
+    {
+     "phrase": "manhole",
+     "weight": 1.0
+    },
+    {
+     "phrase": "overflow",
+     "weight": 1.0
+    },
+    {
+     "phrase": "गटार",
+     "weight": 1.0
+    },
+    {
+     "phrase": "नाली",
+     "weight": 1.0
+    },
+    {
+     "phrase": "choked",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "structural_damage",
+   "display_name": "Structural damage",
+   "hazard_id": "flood",
+   "dedup_radius_m": 100,
+   "dedup_window_min": 60,
+   "base_severity": 4,
+   "life_safety": true,
+   "needs": {
+    "search_rescue": 1,
+    "traffic_control": 1
+   },
+   "keywords": [
+    {
+     "phrase": "wall",
+     "weight": 1.0
+    },
+    {
+     "phrase": "collapse",
+     "weight": 1.0
+    },
+    {
+     "phrase": "roof",
+     "weight": 1.0
+    },
+    {
+     "phrase": "crack",
+     "weight": 1.0
+    },
+    {
+     "phrase": "building collapse",
+     "weight": 1.0
+    },
+    {
+     "phrase": "wall came down",
+     "weight": 1.0
+    },
+    {
+     "phrase": "भिंत",
+     "weight": 1.0
+    },
+    {
+     "phrase": "कोसळ",
+     "weight": 1.0
+    },
+    {
+     "phrase": "दीवार",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "person_stranded",
+   "display_name": "Person stranded",
+   "hazard_id": "flood",
+   "dedup_radius_m": 150,
+   "dedup_window_min": 15,
+   "base_severity": 5,
+   "life_safety": true,
+   "needs": {
+    "water_rescue": 1
+   },
+   "keywords": [
+    {
+     "phrase": "stranded",
+     "weight": 1.0
+    },
+    {
+     "phrase": "stuck",
+     "weight": 1.0
+    },
+    {
+     "phrase": "trapped",
+     "weight": 1.0
+    },
+    {
+     "phrase": "cannot get out",
+     "weight": 1.0
+    },
+    {
+     "phrase": "cant get out",
+     "weight": 1.0
+    },
+    {
+     "phrase": "rescue",
+     "weight": 1.0
+    },
+    {
+     "phrase": "help us",
+     "weight": 1.0
+    },
+    {
+     "phrase": "on the roof",
+     "weight": 1.0
+    },
+    {
+     "phrase": "on terrace",
+     "weight": 1.0
+    },
+    {
+     "phrase": "अडकले",
+     "weight": 1.0
+    },
+    {
+     "phrase": "फसले",
+     "weight": 1.0
+    },
+    {
+     "phrase": "बचाव",
+     "weight": 1.0
+    },
+    {
+     "phrase": "फंसे",
+     "weight": 1.0
+    },
+    {
+     "phrase": "मदद",
+     "weight": 1.0
+    },
+    {
+     "phrase": "drowning",
+     "weight": 1.0
+    },
+    {
+     "phrase": "swept",
+     "weight": 1.0
+    },
+    {
+     "phrase": "not breathing",
+     "weight": 1.0
+    },
+    {
+     "phrase": "unconscious",
+     "weight": 1.0
+    },
+    {
+     "phrase": "bleeding",
+     "weight": 1.0
+    },
+    {
+     "phrase": "collapsed person",
+     "weight": 1.0
+    },
+    {
+     "phrase": "needs ambulance",
+     "weight": 1.0
+    },
+    {
+     "phrase": "chest pain",
+     "weight": 1.0
+    },
+    {
+     "phrase": "need help",
+     "weight": 1.0
+    },
+    {
+     "phrase": "needs help",
+     "weight": 1.0
+    },
+    {
+     "phrase": "help me",
+     "weight": 1.0
+    },
+    {
+     "phrase": "please help",
+     "weight": 1.0
+    },
+    {
+     "phrase": "help right now",
+     "weight": 1.0
+    },
+    {
+     "phrase": "sos",
+     "weight": 1.0
+    },
+    {
+     "phrase": "emergency",
+     "weight": 0.8
+    },
+    {
+     "phrase": "save us",
+     "weight": 1.0
+    },
+    {
+     "phrase": "मदत करा",
+     "weight": 1.0
+    },
+    {
+     "phrase": "मदद करो",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "power_line",
+   "display_name": "Downed power line",
+   "hazard_id": "flood",
+   "dedup_radius_m": 120,
+   "dedup_window_min": 45,
+   "base_severity": 4,
+   "life_safety": true,
+   "needs": {
+    "debris_clearance": 1
+   },
+   "keywords": [
+    {
+     "phrase": "wire",
+     "weight": 1.0
+    },
+    {
+     "phrase": "cable",
+     "weight": 1.0
+    },
+    {
+     "phrase": "electric",
+     "weight": 1.0
+    },
+    {
+     "phrase": "current",
+     "weight": 1.0
+    },
+    {
+     "phrase": "spark",
+     "weight": 1.0
+    },
+    {
+     "phrase": "pole",
+     "weight": 1.0
+    },
+    {
+     "phrase": "transformer",
+     "weight": 1.0
+    },
+    {
+     "phrase": "तार",
+     "weight": 1.0
+    },
+    {
+     "phrase": "बिजली",
+     "weight": 1.0
+    },
+    {
+     "phrase": "वीज",
+     "weight": 1.0
+    },
+    {
+     "phrase": "shock",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "heat_casualty",
+   "display_name": "Heat casualty",
+   "hazard_id": "heat",
+   "dedup_radius_m": 200,
+   "dedup_window_min": 30,
+   "base_severity": 4,
+   "life_safety": true,
+   "needs": {
+    "medical_transport": 1
+   },
+   "keywords": [
+    {
+     "phrase": "heat",
+     "weight": 1.0
+    },
+    {
+     "phrase": "sunstroke",
+     "weight": 1.0
+    },
+    {
+     "phrase": "heatstroke",
+     "weight": 1.0
+    },
+    {
+     "phrase": "fainted",
+     "weight": 1.0
+    },
+    {
+     "phrase": "dehydrat",
+     "weight": 1.0
+    },
+    {
+     "phrase": "उष्ण",
+     "weight": 1.0
+    },
+    {
+     "phrase": "गर्मी",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "supply_shortage",
+   "display_name": "Relief supplies running out",
+   "hazard_id": "flood",
+   "dedup_radius_m": 150,
+   "dedup_window_min": 120,
+   "base_severity": 3,
+   "life_safety": false,
+   "needs": {
+    "supply_delivery": 1
+   },
+   "keywords": [
+    {
+     "phrase": "no food",
+     "weight": 1.0
+    },
+    {
+     "phrase": "no water",
+     "weight": 1.0
+    },
+    {
+     "phrase": "ration",
+     "weight": 1.0
+    },
+    {
+     "phrase": "supplies",
+     "weight": 1.0
+    },
+    {
+     "phrase": "relief",
+     "weight": 1.0
+    },
+    {
+     "phrase": "nothing to eat",
+     "weight": 1.0
+    },
+    {
+     "phrase": "अन्न",
+     "weight": 1.0
+    },
+    {
+     "phrase": "रेशन",
+     "weight": 1.0
+    },
+    {
+     "phrase": "पाणी नाही",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "shelter_full",
+   "display_name": "Shelter at capacity",
+   "hazard_id": "flood",
+   "dedup_radius_m": 120,
+   "dedup_window_min": 180,
+   "base_severity": 3,
+   "life_safety": false,
+   "needs": {
+    "mass_transport": 1
+   },
+   "keywords": []
+  },
+  {
+   "id": "fire",
+   "display_name": "Fire",
+   "hazard_id": "fire",
+   "dedup_radius_m": 120,
+   "dedup_window_min": 30,
+   "base_severity": 5,
+   "life_safety": true,
+   "needs": {
+    "fire_suppression": 1,
+    "medical_transport": 1,
+    "traffic_control": 1
+   },
+   "keywords": [
+    {
+     "phrase": "fire",
+     "weight": 1.0
+    },
+    {
+     "phrase": "burning",
+     "weight": 1.0
+    },
+    {
+     "phrase": "burnt",
+     "weight": 1.0
+    },
+    {
+     "phrase": "smoke",
+     "weight": 1.0
+    },
+    {
+     "phrase": "smouldering",
+     "weight": 1.0
+    },
+    {
+     "phrase": "smoldering",
+     "weight": 1.0
+    },
+    {
+     "phrase": "flames",
+     "weight": 1.0
+    },
+    {
+     "phrase": "blaze",
+     "weight": 1.0
+    },
+    {
+     "phrase": "gas leak",
+     "weight": 1.0
+    },
+    {
+     "phrase": "cylinder burst",
+     "weight": 1.0
+    },
+    {
+     "phrase": "short circuit",
+     "weight": 1.0
+    },
+    {
+     "phrase": "आग",
+     "weight": 1.0
+    },
+    {
+     "phrase": "जळत",
+     "weight": 1.0
+    },
+    {
+     "phrase": "धूर",
+     "weight": 1.0
+    },
+    {
+     "phrase": "धुर",
+     "weight": 1.0
+    },
+    {
+     "phrase": "आगीत",
+     "weight": 1.0
+    },
+    {
+     "phrase": "जल रहा",
+     "weight": 1.0
+    },
+    {
+     "phrase": "धुआं",
+     "weight": 1.0
+    },
+    {
+     "phrase": "आग लग",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "unknown_report",
+   "display_name": "Not yet classified",
+   "hazard_id": "flood",
+   "dedup_radius_m": 150,
+   "dedup_window_min": 60,
+   "base_severity": 3,
+   "life_safety": false,
+   "needs": {
+    "field_assessment": 1
+   },
+   "keywords": []
+  },
+  {
+   "id": "air_quality",
+   "display_name": "Air quality",
+   "hazard_id": "air",
+   "dedup_radius_m": 2000,
+   "dedup_window_min": 180,
+   "base_severity": 3,
+   "life_safety": false,
+   "needs": {},
+   "keywords": [
+    {
+     "phrase": "smog",
+     "weight": 1.0
+    },
+    {
+     "phrase": "haze",
+     "weight": 1.0
+    },
+    {
+     "phrase": "air quality",
+     "weight": 1.0
+    },
+    {
+     "phrase": "aqi",
+     "weight": 1.0
+    },
+    {
+     "phrase": "pollution",
+     "weight": 1.0
+    },
+    {
+     "phrase": "burning eyes",
+     "weight": 1.0
+    },
+    {
+     "phrase": "hard to breathe",
+     "weight": 1.0
+    },
+    {
+     "phrase": "धुरके",
+     "weight": 1.0
+    },
+    {
+     "phrase": "प्रदूषण",
+     "weight": 1.0
+    },
+    {
+     "phrase": "हवा खराब",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "earthquake_damage",
+   "display_name": "Earthquake damage",
+   "hazard_id": "seismic",
+   "dedup_radius_m": 200,
+   "dedup_window_min": 60,
+   "base_severity": 5,
+   "life_safety": true,
+   "needs": {
+    "search_rescue": 1,
+    "medical_transport": 1
+   },
+   "keywords": [
+    {
+     "phrase": "earthquake",
+     "weight": 1.0
+    },
+    {
+     "phrase": "tremor",
+     "weight": 1.0
+    },
+    {
+     "phrase": "tremors",
+     "weight": 1.0
+    },
+    {
+     "phrase": "quake",
+     "weight": 1.0
+    },
+    {
+     "phrase": "aftershock",
+     "weight": 1.0
+    },
+    {
+     "phrase": "भूकंप",
+     "weight": 1.0
+    },
+    {
+     "phrase": "धक्का बसला",
+     "weight": 1.0
+    },
+    {
+     "phrase": "भूकंप आया",
+     "weight": 1.0
+    }
+   ]
+  },
+  {
+   "id": "evacuation",
+   "display_name": "Evacuation (convoy to shelter)",
+   "hazard_id": "flood",
+   "dedup_radius_m": 50,
+   "dedup_window_min": 600,
+   "base_severity": 4,
+   "life_safety": true,
+   "needs": {},
+   "keywords": []
+  },
+  {
+   "id": "traffic_corridor",
+   "display_name": "Priority corridor (keep road clear)",
+   "hazard_id": "flood",
+   "dedup_radius_m": 50,
+   "dedup_window_min": 600,
+   "base_severity": 3,
+   "life_safety": false,
+   "needs": {},
+   "keywords": []
+  }
+ ],
+ "lifeline_kinds": [
+  {
+   "id": "hospital",
+   "display_name": "Hospital",
+   "shelters_people": false,
+   "serves_public": true
+  },
+  {
+   "id": "school",
+   "display_name": "School",
+   "shelters_people": false,
+   "serves_public": true
+  },
+  {
+   "id": "shelter",
+   "display_name": "Shelter",
+   "shelters_people": true,
+   "serves_public": true
+  },
+  {
+   "id": "pump_station",
+   "display_name": "Pump station",
+   "shelters_people": false,
+   "serves_public": false
+  },
+  {
+   "id": "substation",
+   "display_name": "Substation",
+   "shelters_people": false,
+   "serves_public": false
+  },
+  {
+   "id": "relief_centre",
+   "display_name": "Relief centre",
+   "shelters_people": true,
+   "serves_public": true
+  },
+  {
+   "id": "water_point",
+   "display_name": "Drinking water point",
+   "shelters_people": false,
+   "serves_public": true
+  },
+  {
+   "id": "medical_camp",
+   "display_name": "Medical camp",
+   "shelters_people": false,
+   "serves_public": true
+  },
+  {
+   "id": "food_kitchen",
+   "display_name": "Community kitchen",
+   "shelters_people": false,
+   "serves_public": true
+  },
+  {
+   "id": "hotel",
+   "display_name": "Hotel / lodge rooms (requisitioned)",
+   "shelters_people": true,
+   "serves_public": true
+  },
+  {
+   "id": "host_family",
+   "display_name": "Host families (registered pool)",
+   "shelters_people": true,
+   "serves_public": true
+  }
+ ],
+ "agencies": [
+  {
+   "id": "pmc",
+   "name": "Pune Municipal Corporation",
+   "short_name": "PMC",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": [
+    "debris_clearance",
+    "dewatering"
+   ]
+  },
+  {
+   "id": "fire",
+   "name": "Pune Fire Brigade",
+   "short_name": "Fire",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": [
+    "dewatering",
+    "fire_suppression",
+    "search_rescue",
+    "water_rescue"
+   ]
+  },
+  {
+   "id": "police",
+   "name": "Pune City Police",
+   "short_name": "Police",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": [
+    "debris_clearance"
+   ]
+  },
+  {
+   "id": "ndrf",
+   "name": "National Disaster Response Force",
+   "short_name": "NDRF",
+   "kind": "government",
+   "jurisdiction": "state",
+   "city_id": "pune",
+   "capabilities": [
+    "search_rescue",
+    "water_rescue"
+   ]
+  },
+  {
+   "id": "sdrf",
+   "name": "State Disaster Response Force",
+   "short_name": "SDRF",
+   "kind": "government",
+   "jurisdiction": "state",
+   "city_id": "pune",
+   "capabilities": [
+    "search_rescue",
+    "water_rescue"
+   ]
+  },
+  {
+   "id": "health",
+   "name": "Municipal Health Department",
+   "short_name": "Health",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": [
+    "medical_care",
+    "medical_transport"
+   ]
+  },
+  {
+   "id": "transport",
+   "name": "Pune Mahanagar Parivahan Mahamandal",
+   "short_name": "PMPML",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": [
+    "mass_transport"
+   ]
+  },
+  {
+   "id": "gmc",
+   "name": "Ghaziabad Municipal Corporation",
+   "short_name": "GMC",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "upfs",
+   "name": "UP Fire & Emergency Services, Ghaziabad",
+   "short_name": "UP Fire",
+   "kind": "government",
+   "jurisdiction": "district",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "ndrf8",
+   "name": "NDRF 8th Battalion, Ghaziabad",
+   "short_name": "NDRF 8",
+   "kind": "government",
+   "jurisdiction": "national",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "pcmc",
+   "name": "Pimpri Chinchwad Municipal Corporation",
+   "short_name": "PCMC",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "pcmcfire",
+   "name": "PCMC Fire Brigade",
+   "short_name": "PCMC Fire",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "pcpolice",
+   "name": "Pimpri Chinchwad Police",
+   "short_name": "PCPC",
+   "kind": "government",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": [
+    "field_assessment",
+    "traffic_control"
+   ]
+  },
+  {
+   "id": "redcross",
+   "name": "Indian Red Cross Society, Pune branch",
+   "short_name": "Red Cross",
+   "kind": "ngo",
+   "jurisdiction": "district",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "sevasahyog",
+   "name": "Volunteer network (Seva Sahayog / civil society)",
+   "short_name": "Volunteers",
+   "kind": "volunteer",
+   "jurisdiction": "city",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "army",
+   "name": "Indian Army, Southern Command (aid to civil authority)",
+   "short_name": "Army",
+   "kind": "government",
+   "jurisdiction": "national",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "pvttransport",
+   "name": "Private bus and tanker operators (requisitioned)",
+   "short_name": "Private fleet",
+   "kind": "private",
+   "jurisdiction": "district",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "iaf",
+   "name": "Indian Air Force (HADR, via state request)",
+   "short_name": "IAF",
+   "kind": "government",
+   "jurisdiction": "national",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "stateaviation",
+   "name": "Maharashtra Government aviation (state helicopter)",
+   "short_name": "State heli",
+   "kind": "government",
+   "jurisdiction": "state",
+   "city_id": "pune",
+   "capabilities": []
+  },
+  {
+   "id": "hoteliers",
+   "name": "Hotel and lodge owners (rooms requisitioned by the Collector)",
+   "short_name": "Hotels",
+   "kind": "private",
+   "jurisdiction": "district",
+   "city_id": "pune",
+   "capabilities": []
+  }
+ ],
+ "kinds_providing": {
+  "water_rescue": {
+   "boat": 1.0,
+   "fire_engine": 0.6,
+   "rescue_team": 0.8,
+   "helicopter": 0.9
+  },
+  "search_rescue": {
+   "boat": 0.7,
+   "rescue_team": 1.0,
+   "helicopter": 0.8
+  },
+  "field_assessment": {
+   "boat": 0.6,
+   "ambulance": 0.8,
+   "fire_engine": 0.8,
+   "rescue_team": 1.0,
+   "police": 0.8
+  },
+  "dewatering": {
+   "pump": 1.0,
+   "fire_engine": 0.5
+  },
+  "medical_transport": {
+   "ambulance": 1.0,
+   "helicopter": 0.7
+  },
+  "medical_care": {
+   "ambulance": 0.7
+  },
+  "fire_suppression": {
+   "fire_engine": 1.0
+  },
+  "debris_clearance": {
+   "rescue_team": 0.6,
+   "jcb": 1.0
+  },
+  "mass_transport": {
+   "bus": 1.0,
+   "supply_truck": 0.4
+  },
+  "supply_delivery": {
+   "bus": 0.45,
+   "supply_truck": 1.0,
+   "water_tanker": 0.6,
+   "helicopter": 0.5
+  },
+  "water_supply": {
+   "water_tanker": 1.0
+  },
+  "traffic_control": {
+   "police": 1.0
+  }
+ },
+ "counts": {
+  "hazard_types": 5,
+  "capabilities": 12,
+  "resource_kinds": 11,
+  "incident_categories": 16,
+  "lifeline_kinds": 11,
+  "agencies": 20,
+  "keywords": 147
+ }
+}
